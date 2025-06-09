@@ -13,6 +13,20 @@ import (
 // ********* LOGGING **************************************
 // ********************************************************
 
+// logTo is 'o,e or f' for stdout, stderr and file
+var logTo = 'o'  // Default to stdout for better integration with Amazon Q
+var logFilePath = "/tmp/mcp.log"
+
+// SetLogOutput changes where logs are written
+func SetLogOutput(dest rune) {
+	if dest == 'o' || dest == 'e' || dest == 'f' {
+		logTo = dest
+		Info("Log output set to:", string(dest))
+	} else {
+		Error("Invalid log destination:", string(dest))
+	}
+}
+
 var showDateTime bool
 var defaultLogger *Logger
 
@@ -77,7 +91,7 @@ func NewLogger(level LogLevel) *Logger {
 	}
 
 	return &Logger{
-		infoLogger:  log.New(os.Stderr, "", flags),
+		infoLogger:  log.New(os.Stdout, "", flags),
 		errorLogger: log.New(os.Stderr, "", flags),
 		level:       level,
 	}
@@ -136,11 +150,31 @@ func (l *Logger) log(level LogLevel, format string, v ...any) {
 		msg,
 		colorReset)
 
-	// Write to appropriate output
-	if level >= ERROR {
-		l.errorLogger.Println(logMsg)
-	} else {
-		l.infoLogger.Println(logMsg)
+	// Handle different output destinations based on logTo flag
+	switch logTo {
+	case 'f':
+		// Append to file
+		f, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			// Fall back to stderr if file can't be opened
+			fmt.Fprintf(os.Stderr, "Failed to open log file: %v\n", err)
+			fmt.Fprintln(os.Stderr, logMsg)
+			return
+		}
+		defer f.Close()
+		fmt.Fprintln(f, logMsg)
+	case 'e':
+		// Output to stderr
+		fmt.Fprintln(os.Stderr, logMsg)
+	case 'o':
+		fallthrough
+	default:
+		// Default to stdout
+		if level >= ERROR {
+			fmt.Fprintln(os.Stderr, logMsg)
+		} else {
+			fmt.Fprintln(os.Stdout, logMsg)
+		}
 	}
 }
 
