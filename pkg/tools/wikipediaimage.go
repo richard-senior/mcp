@@ -41,78 +41,8 @@ func WikipediaImageTool() protocol.Tool {
 	}
 }
 
-// HandleWikipediaImageTool handles the Wikipedia image tool invocation
-func HandleWikipediaImageTool(params interface{}) (interface{}, error) {
-	logger.Info("Handling Wikipedia image tool invocation")
-
-	// Parse parameters
-	paramsMap, ok := params.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid parameters format")
-	}
-
-	query, ok := paramsMap["query"].(string)
-	if !ok {
-		return nil, fmt.Errorf("query parameter is required and must be a string")
-	}
-
-	// Get image size (default to 500)
-	imageSize := 500
-	if sizeParam, ok := paramsMap["size"]; ok {
-		if sizeFloat, ok := sizeParam.(float64); ok {
-			imageSize = int(sizeFloat)
-		}
-	}
-
-	// Validate image size
-	if imageSize <= 0 {
-		imageSize = 500 // Reset to default if invalid
-	}
-
-	// Search for the image
-	imageData, contentType, err := wikipediaImageSearch(query, imageSize)
-	if err != nil {
-		return nil, err
-	}
-
-	// Return the image data
-	return map[string]any{
-		"image":         imageData,
-		"contentType":   contentType,
-		"query":         query,
-		"size":          len(imageData),
-		"requestedSize": imageSize,
-	}, nil
-}
-
-// WikipediaImageSaveTool returns the Wikipedia image save tool definition
-func WikipediaImageSaveTool() protocol.Tool {
-	return protocol.Tool{
-		Name:        "wikipedia_image_save",
-		Description: "Search for an image on Wikipedia and save it to disk",
-		InputSchema: protocol.InputSchema{
-			Type: "object",
-			Properties: map[string]protocol.ToolProperty{
-				"query": {
-					Type:        "string",
-					Description: "The search query for the image",
-				},
-				"size": {
-					Type:        "integer",
-					Description: "Desired image size in pixels (default: 500)",
-				},
-				"output_path": {
-					Type:        "string",
-					Description: "Path where the image should be saved (optional, will be generated based on query if not provided)",
-				},
-			},
-			Required: []string{"query"},
-		},
-	}
-}
-
-// HandleWikipediaImageSaveTool handles the Wikipedia image save tool invocation
-func HandleWikipediaImageSaveTool(params interface{}) (interface{}, error) {
+// HandleWikipediaImageTool handles the Wikipedia image save tool invocation
+func HandleWikipediaImageTool(params any) (any, error) {
 	logger.Info("Handling Wikipedia image save tool invocation")
 
 	// Parse parameters

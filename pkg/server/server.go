@@ -233,16 +233,23 @@ func (s *Server) handleInitialize(params interface{}) (interface{}, error) {
 	// Create the initialize response structure based on the example
 	// {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"Demo","version":"1.0.0"}}}
 	initializeResponse := struct {
-		ProtocolVersion string                 `json:"protocolVersion"`
-		Capabilities    map[string]interface{} `json:"capabilities"`
+		ProtocolVersion string         `json:"protocolVersion"`
+		Capabilities    map[string]any `json:"capabilities"`
 		ServerInfo      struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		} `json:"serverInfo"`
 	}{
 		ProtocolVersion: "2024-11-05",
-		Capabilities: map[string]interface{}{
+		Capabilities: map[string]any{
+			// Resources do not seem to be supported
+			"resources": struct{}{},
+			// Tools are very much supported
 			"tools": struct{}{},
+			// Prompts are supported
+			//"prompts":   struct{}{},
+			// Rules are not supported
+			//"rules": struct{}{},
 		},
 		ServerInfo: struct {
 			Name    string `json:"name"`

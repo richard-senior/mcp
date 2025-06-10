@@ -14,10 +14,10 @@ import (
 func main() {
 	// Configure logging
 	logger.SetShowDateTime(true)
-	
+
 	// Set log output to file before any logging occurs
 	logger.SetLogOutput('f')
-	
+
 	logger.Info("Starting github.com/richard-senior/mcp application")
 
 	// Log command line arguments
@@ -53,10 +53,6 @@ func main() {
 	wikipediaImageTool := tools.WikipediaImageTool()
 	wikipediaImageTool.Name = "mcp___" + wikipediaImageTool.Name
 	s.RegisterTool(wikipediaImageTool, tools.HandleWikipediaImageTool)
-
-	wikipediaImageSaveTool := tools.WikipediaImageSaveTool()
-	wikipediaImageSaveTool.Name = "mcp___" + wikipediaImageSaveTool.Name
-	s.RegisterTool(wikipediaImageSaveTool, tools.HandleWikipediaImageSaveTool)
 
 	// Register resources
 	s.RegisterResource(resources.ExampleResource())
