@@ -5,6 +5,9 @@
 *.so
 *.dylib
 mcp
+.amazonq
+.assets
+.podds
 
 # Test binary, built with `go test -c`
 *.test
@@ -32,3 +35,12 @@ go.work
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+.amazonq/
+.assets/
