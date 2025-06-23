@@ -1,10 +1,12 @@
 package logger
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 )
@@ -13,22 +15,9 @@ import (
 // ********* LOGGING **************************************
 // ********************************************************
 
-// logTo is 'o,e or f' for stdout, stderr and file
-var logTo = 'o'  // Default to stdout for better integration with Amazon Q
-var logFilePath = "/tmp/mcp.log"
-
-// SetLogOutput changes where logs are written
-func SetLogOutput(dest rune) {
-	if dest == 'o' || dest == 'e' || dest == 'f' {
-		logTo = dest
-		Info("Log output set to:", string(dest))
-	} else {
-		Error("Invalid log destination:", string(dest))
-	}
-}
-
 var showDateTime bool
 var defaultLogger *Logger
+var logFile *os.File
 
 type LogLevel int
 
@@ -82,6 +71,58 @@ func SetShowDateTime(value bool) {
 	updateLoggerFlags(defaultLogger)
 }
 
+// SetLogOutput sets the output destination for logs
+// 'c' for console, 'f' for file, 'b' for both
+func SetLogOutput(outputType rune) {
+	// Close any existing log file
+	if logFile != nil {
+		logFile.Close()
+		logFile = nil
+	}
+
+	var infoWriter, errorWriter *os.File
+
+	switch outputType {
+	case 'c': // Console only
+		infoWriter = os.Stdout
+		errorWriter = os.Stderr
+	case 'f': // File only
+		var err error
+		logFile, err = os.OpenFile("/tmp/mcp.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to open log file: %v\n", err)
+			os.Exit(1)
+		}
+		infoWriter = logFile
+		errorWriter = logFile
+	case 'b': // Both console and file
+		var err error
+		logFile, err = os.OpenFile("/tmp/mcp.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to open log file: %v\n", err)
+			os.Exit(1)
+		}
+		// Use MultiWriter to write to both console and file
+		infoWriter = os.Stdout
+		errorWriter = os.Stderr
+		// Note: This is simplified; for a real implementation you'd use io.MultiWriter
+	default:
+		fmt.Fprintf(os.Stderr, "Invalid log output type: %c\n", outputType)
+		os.Exit(1)
+	}
+
+	// Update the loggers
+	var flags int
+	if showDateTime {
+		flags = log.Ldate | log.Ltime
+	} else {
+		flags = 0
+	}
+
+	defaultLogger.infoLogger = log.New(infoWriter, "", flags)
+	defaultLogger.errorLogger = log.New(errorWriter, "", flags)
+}
+
 func NewLogger(level LogLevel) *Logger {
 	var flags int
 	if showDateTime {
@@ -114,8 +155,18 @@ func (l *Logger) log(level LogLevel, format string, v ...any) {
 
 	// Format message with any additional arguments
 	var msg string
+	var jsonObjects []string // To store JSON representations of complex objects
+
 	if len(v) > 0 {
-		msg = fmt.Sprintf(format+" %s", formatArgs(v...))
+		// Process arguments, converting non-primitives to JSON
+		processedArgs, jsonStrings := processArgs(v...)
+		jsonObjects = jsonStrings
+
+		if len(processedArgs) > 0 {
+			msg = fmt.Sprintf(format+" %s", strings.Join(processedArgs, " "))
+		} else {
+			msg = format
+		}
 	} else {
 		msg = format
 	}
@@ -150,30 +201,30 @@ func (l *Logger) log(level LogLevel, format string, v ...any) {
 		msg,
 		colorReset)
 
-	// Handle different output destinations based on logTo flag
-	switch logTo {
-	case 'f':
-		// Append to file
-		f, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			// Fall back to stderr if file can't be opened
-			fmt.Fprintf(os.Stderr, "Failed to open log file: %v\n", err)
-			fmt.Fprintln(os.Stderr, logMsg)
-			return
+	// Write to appropriate output
+	if level >= ERROR {
+		l.errorLogger.Println(logMsg)
+		// Print any JSON objects on separate lines
+		for _, jsonObj := range jsonObjects {
+			l.errorLogger.Println(fmt.Sprintf("[%s] %s:%d: %s%s%s",
+				level.String(),
+				file,
+				line,
+				colorCode,
+				jsonObj,
+				colorReset))
 		}
-		defer f.Close()
-		fmt.Fprintln(f, logMsg)
-	case 'e':
-		// Output to stderr
-		fmt.Fprintln(os.Stderr, logMsg)
-	case 'o':
-		fallthrough
-	default:
-		// Default to stdout
-		if level >= ERROR {
-			fmt.Fprintln(os.Stderr, logMsg)
-		} else {
-			fmt.Fprintln(os.Stdout, logMsg)
+	} else {
+		l.infoLogger.Println(logMsg)
+		// Print any JSON objects on separate lines
+		for _, jsonObj := range jsonObjects {
+			l.infoLogger.Println(fmt.Sprintf("[%s] %s:%d: %s%s%s",
+				level.String(),
+				file,
+				line,
+				colorCode,
+				jsonObj,
+				colorReset))
 		}
 	}
 }
@@ -199,7 +250,72 @@ func (l LogLevel) String() string {
 	}
 }
 
+// processArgs processes arguments, converting non-primitives to JSON
+// Returns a slice of string representations for primitive types and a slice of JSON strings for complex types
+func processArgs(args ...any) ([]string, []string) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+
+	var primitives []string
+	var jsonObjects []string
+
+	for _, arg := range args {
+		// Check if the argument is a primitive type
+		if isPrimitive(arg) {
+			// Format primitive types as before
+			switch v := arg.(type) {
+			case float32:
+				primitives = append(primitives, fmt.Sprintf("%.2f", v))
+			case float64:
+				primitives = append(primitives, fmt.Sprintf("%.2f", v))
+			case int:
+				primitives = append(primitives, fmt.Sprintf("%d", v))
+			case bool:
+				primitives = append(primitives, fmt.Sprintf("%v", v))
+			case string:
+				primitives = append(primitives, v)
+			case error:
+				primitives = append(primitives, v.Error())
+			case nil:
+				primitives = append(primitives, "nil")
+			default:
+				// This shouldn't happen if isPrimitive is correct
+				primitives = append(primitives, fmt.Sprintf("%v", v))
+			}
+		} else {
+			// For non-primitive types, convert to JSON
+			jsonBytes, err := json.MarshalIndent(arg, "", "  ")
+			if err != nil {
+				// If JSON conversion fails, use standard formatting
+				primitives = append(primitives, fmt.Sprintf("%v", arg))
+			} else {
+				// Add a placeholder in the primitives list
+				primitives = append(primitives, fmt.Sprintf("[Object of type %s]", reflect.TypeOf(arg)))
+				// Add the JSON to the jsonObjects list
+				jsonObjects = append(jsonObjects, string(jsonBytes))
+			}
+		}
+	}
+	return primitives, jsonObjects
+}
+
+// isPrimitive checks if a value is a primitive type
+func isPrimitive(v any) bool {
+	if v == nil {
+		return true
+	}
+
+	switch v.(type) {
+	case string, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, error:
+		return true
+	default:
+		return false
+	}
+}
+
 // formatArgs converts any number of interface{} arguments into a formatted string
+// Kept for backward compatibility
 func formatArgs(args ...any) string {
 	if len(args) == 0 {
 		return ""

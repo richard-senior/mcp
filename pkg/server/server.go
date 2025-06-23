@@ -6,10 +6,13 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/richard-senior/mcp/internal/logger"
 	"github.com/richard-senior/mcp/pkg/protocol"
+	"github.com/richard-senior/mcp/pkg/resources"
+	"github.com/richard-senior/mcp/pkg/tools"
 	"github.com/richard-senior/mcp/pkg/transport"
 )
 
@@ -19,23 +22,54 @@ type Server struct {
 	handlers  map[string]HandlerFunc
 	tools     []protocol.Tool
 	resources []protocol.Resource
+	prompts   []protocol.Prompt
 }
 
 // HandlerFunc is a function that handles an MCP request
 type HandlerFunc func(params interface{}) (interface{}, error)
 
-// NewServer creates a new MCP server with the specified transport
-func NewServer(t transport.Transport) *Server {
-	return &Server{
-		transport: t,
-		handlers:  make(map[string]HandlerFunc),
-		tools:     []protocol.Tool{},
-		resources: []protocol.Resource{},
+// Singleton instance
+var (
+	instance *Server
+	once     sync.Once
+	mu       sync.Mutex
+)
+
+// GetInstance returns the singleton instance of the Server
+func GetInstance() *Server {
+	if instance == nil {
+		// Create a transport for communication
+		t := transport.NewStdioTransport()
+		// TODO more transports!
+		instance = InitInstance(t)
+		logger.Warn("Server instance requested but not initialized. Use InitInstance first.")
 	}
+	return instance
+}
+
+// InitInstance initializes the singleton instance of the Server with the specified transport
+func InitInstance(t transport.Transport) *Server {
+	once.Do(func() {
+		instance = &Server{
+			transport: t,
+			handlers:  make(map[string]HandlerFunc),
+			tools:     []protocol.Tool{},
+			resources: []protocol.Resource{},
+			prompts:   []protocol.Prompt{},
+		}
+		// Register default tools and resources
+		instance.RegisterDefaultTools()
+		instance.RegisterDefaultResources()
+		instance.RegisterDefaultPrompts()
+	})
+	return instance
 }
 
 // RegisterTool registers a tool with the server
 func (s *Server) RegisterTool(tool protocol.Tool, handler HandlerFunc) {
+	mu.Lock()
+	defer mu.Unlock()
+
 	s.tools = append(s.tools, tool)
 	s.handlers[tool.Name] = handler
 	logger.Info("Registered tool:", tool.Name)
@@ -43,20 +77,74 @@ func (s *Server) RegisterTool(tool protocol.Tool, handler HandlerFunc) {
 
 // RegisterResource registers a resource with the server
 func (s *Server) RegisterResource(resource protocol.Resource) {
+	mu.Lock()
+	defer mu.Unlock()
+
 	s.resources = append(s.resources, resource)
 	logger.Info("Registered resource:", resource.Name)
+}
+
+// RegisterDefaultTools registers all the default tools with the server
+func (s *Server) RegisterDefaultTools() {
+	logger.Info("Registering default tools...")
+
+	// Register Google search tool
+	googleSearchTool := tools.GoogleSearchTool()
+	googleSearchTool.Name = "mcp___" + googleSearchTool.Name
+	s.RegisterTool(googleSearchTool, tools.HandleGoogleSearchTool)
+
+	// Register Html to Markdown tool
+	html2MarkdownTool := tools.HTMLToMarkdownTool()
+	html2MarkdownTool.Name = "mcp___" + html2MarkdownTool.Name
+	s.RegisterTool(html2MarkdownTool, tools.HandleURLToMarkdown)
+
+	// Register Wikipedia image tool
+	wikipediaImageTool := tools.WikipediaImageTool()
+	wikipediaImageTool.Name = "mcp___" + wikipediaImageTool.Name
+	s.RegisterTool(wikipediaImageTool, tools.HandleWikipediaImageTool)
+
+	// Register Meme tool
+	memeTool := tools.NewMemeTool()
+	memeTool.Name = "mcp___" + memeTool.Name
+	s.RegisterTool(memeTool, tools.HandleMemeTool)
+
+	// Register Thoughts tool
+	//thoughtsTool := tools.NewThoughtsTool()
+	//thoughtsTool.Name = "mcp___" + thoughtsTool.Name
+	//s.RegisterTool(thoughtsTool, tools.HandleThoughts)
+
+	// Register SVG Tools
+	//svgTool := tools.NewSvgTool()
+	//svgTool.Name = "mcp___" + svgTool.Name
+	//s.RegisterTool(svgTool, tools.HandleSvgTool)
+}
+
+// RegisterDefaultResources registers all the default resources with the server
+func (s *Server) RegisterDefaultPrompts() {
+	// load the prompts
+}
+
+// RegisterDefaultResources registers all the default resources with the server
+func (s *Server) RegisterDefaultResources() {
+	logger.Info("Registering default resources...")
+
+	// Register example resource
+	s.RegisterResource(resources.ExampleResource())
+
+	// Register weather resource
+	s.RegisterResource(resources.WeatherResource())
 }
 
 // Start starts the server and begins processing requests
 func (s *Server) Start() error {
 	logger.Info("Starting MCP server")
-
 	// Register built-in handlers
 	s.handlers[string(protocol.MethodInitialize)] = s.handleInitialize
 	s.handlers[string(protocol.MethodInitialized)] = s.handleInitialized
 	s.handlers[string(protocol.MethodToolsList)] = s.handleToolsList
-	s.handlers[string(protocol.MethodResourcesList)] = s.handleResourcesList
+	//s.handlers[string(protocol.MethodResourcesList)] = s.handleResourcesList
 	s.handlers[string(protocol.MethodToolsCall)] = s.handleToolsCall
+	//s.handlers[string(protocol.MethodPromptsList)] = s.handlePromptsList
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -102,6 +190,7 @@ func (s *Server) processRequests() error {
 }
 
 // handleRequest processes a request and returns a response
+// TODO deal with multiple protocols
 func (s *Server) handleRequest(req *protocol.JsonRpcRequest) *protocol.JsonRpcResponse {
 	// Create a base response
 	resp := &protocol.JsonRpcResponse{
@@ -109,15 +198,15 @@ func (s *Server) handleRequest(req *protocol.JsonRpcRequest) *protocol.JsonRpcRe
 		ID:      req.ID,
 	}
 
-	logger.Info("Handling request:", req)
+	logger.Info(">> ", req.Method)
 
 	// Find the appropriate handler
 	var handler HandlerFunc
-	var params interface{}
+	var params any
 
 	if req.Method == string(protocol.MethodInvokeTool) {
 		// For invoke_tool, extract the tool name and parameters
-		var invokeParams map[string]interface{}
+		var invokeParams map[string]any
 		if err := json.Unmarshal(req.Params, &invokeParams); err != nil {
 			resp.Error = &protocol.JsonRpcError{
 				Code:    protocol.ErrInvalidParams,
@@ -180,7 +269,7 @@ func (s *Server) handleRequest(req *protocol.JsonRpcRequest) *protocol.JsonRpcRe
 	}
 
 	// Set the result
-	resultBytes, err := json.Marshal(result)
+	resultBytes, err := json.MarshalIndent(result, "", " ")
 	if err != nil {
 		resp.Error = &protocol.JsonRpcError{
 			Code:    protocol.ErrInternal,
@@ -191,6 +280,24 @@ func (s *Server) handleRequest(req *protocol.JsonRpcRequest) *protocol.JsonRpcRe
 	logger.Inform("output \n", string(resultBytes))
 	resp.Result = resultBytes
 	return resp
+}
+
+// handlePromptsList returns a list of stored prompts
+func (s *Server) handlePromptsList(params interface{}) (interface{}, error) {
+	logger.Info("Handling prompts/list request")
+
+	// Example response format from comment:
+	// {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"add","inputSchema":{"type":"object","properties":{"a":{"type":"number"},"b":{"type":"number"}},"required":["a","b"],"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"}}]}}
+
+	// Create a response structure that lists all registered tools
+	toolsResponse := struct {
+		Tools []protocol.Tool `json:"tools"`
+	}{
+		Tools: s.tools,
+	}
+
+	// Return the tools response directly - the handleRequest function will wrap it in a JSON-RPC response
+	return toolsResponse, nil
 }
 
 // handleToolsList handles the tools/list method
@@ -228,7 +335,7 @@ func (s *Server) handleResourcesList(params interface{}) (interface{}, error) {
 
 // handleInitialize handles the initialize method
 func (s *Server) handleInitialize(params interface{}) (interface{}, error) {
-	logger.Info("Handling initialize request")
+	logger.Info("Handling initialize request:")
 
 	// Create the initialize response structure based on the example
 	// {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"Demo","version":"1.0.0"}}}
@@ -243,11 +350,11 @@ func (s *Server) handleInitialize(params interface{}) (interface{}, error) {
 		ProtocolVersion: "2024-11-05",
 		Capabilities: map[string]any{
 			// Resources do not seem to be supported
-			"resources": struct{}{},
+			// "resources": struct{}{},
 			// Tools are very much supported
 			"tools": struct{}{},
 			// Prompts are supported
-			//"prompts":   struct{}{},
+			// "prompts": struct{}{},
 			// Rules are not supported
 			//"rules": struct{}{},
 		},

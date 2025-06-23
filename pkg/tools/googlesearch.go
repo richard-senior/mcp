@@ -1,20 +1,20 @@
 package tools
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/richard-senior/mcp/internal/logger"
 	"github.com/richard-senior/mcp/pkg/protocol"
+	"github.com/richard-senior/mcp/pkg/transport"
 )
+
+const surl = "https://customsearch.googleapis.com/customsearch/v1"
+const searchKey = "AIzaSyBqIgU6NTu8uPnusd4IRvC1tG-CDKaqrgM"
+const searchEngineID = "32e99349b2ae84bcd"
 
 // SearchResult represents a single search result
 type SearchResult struct {
@@ -26,18 +26,31 @@ type SearchResult struct {
 // GoogleSearchTool returns the Google search tool definition
 func GoogleSearchTool() protocol.Tool {
 	return protocol.Tool{
-		Name:        "google_search",
-		Description: "Performs a google search for the given text and returns the top 'num' responses",
+		Name: "google_search",
+		Description: `
+		Performs an internet web (google) search for the given text and returns the top 'num' responses.
+		For each of the 'num' results the following information is returned:
+		- Title: The title of the search result
+		- URL: The URL of the search result. This can then be with the html_2_markdown tool to retrieve the content
+		- Description: The summary of the contents of the web page
+		This tool should be used when:
+		- You have no current information about the issue, you can formulate a question that will get you data from the internet
+		- the use asks you to find information about..
+		- the user suggests that you search the internet for..
+		- the user asks you to google..
+		- the user asks you to get me information about..
+		etc.
+		`,
 		InputSchema: protocol.InputSchema{
 			Type: "object",
 			Properties: map[string]protocol.ToolProperty{
 				"query": {
 					Type:        "string",
-					Description: "The search string to be entered into google search",
+					Description: "The search term for example 'Ozric Tentacles' ",
 				},
 				"num": {
 					Type:        "integer",
-					Description: "The number of results to return",
+					Description: "The number of results to return, defaults to 3",
 				},
 			},
 			Required: []string{"query"},
@@ -49,7 +62,7 @@ func GoogleSearchTool() protocol.Tool {
 func HandleGoogleSearchTool(params any) (any, error) {
 	logger.Info("Handling Google search tool invocation")
 
-	// Parse parameters
+	// Convert params to map[string]any
 	paramsMap, ok := params.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("invalid parameters format")
@@ -74,7 +87,7 @@ func HandleGoogleSearchTool(params any) (any, error) {
 	}
 
 	// Perform the search
-	results, err := googleSearch(query, numResults)
+	results, err := GoogleSearch(query, numResults, false)
 	if err != nil {
 		return nil, err
 	}
@@ -87,65 +100,9 @@ func HandleGoogleSearchTool(params any) (any, error) {
 	}, nil
 }
 
-// getZScalerBundle returns the Zscaler CA bundle if available
-func getZScalerBundle() ([]byte, error) {
-	// Path to Zscaler CA bundle
-	bundlePath := filepath.Join(os.Getenv("HOME"), ".ssh/zscaler_ca_bundle.pem")
-
-	// Load Zscaler CA bundle
-	caCert, err := os.ReadFile(bundlePath)
-	if err != nil {
-		logger.Warn("Failed to read Zscaler CA bundle", err)
-		return nil, err
-	}
-
-	return caCert, nil
-}
-
-// getCustomHTTPClient returns an HTTP client with custom TLS configuration
-func getCustomHTTPClient() (*http.Client, error) {
-	// Create a custom certificate pool
-	rootCAs, err := x509.SystemCertPool()
-	if err != nil {
-		logger.Warn("Failed to get system cert pool", err)
-		rootCAs = x509.NewCertPool()
-	}
-
-	// Get the Zscaler bundle
-	zscalerCert, err := getZScalerBundle()
-	if err != nil {
-		logger.Warn("Proceeding without Zscaler certificate", err)
-	} else {
-		// Append the Zscaler certificate to the root CAs
-		if ok := rootCAs.AppendCertsFromPEM(zscalerCert); !ok {
-			logger.Warn("Failed to append Zscaler CA certificate")
-		} else {
-			logger.Info("Added Zscaler certificate to root CAs")
-		}
-	}
-
-	// Create custom transport with the certificate pool
-	customTransport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			RootCAs: rootCAs,
-		},
-		Proxy: http.ProxyFromEnvironment,
-	}
-
-	// Create a custom client with the transport
-	client := &http.Client{
-		Transport: customTransport,
-		Timeout:   30 * time.Second,
-	}
-
-	return client, nil
-}
-
 // googleSearch performs a Google search using the Custom Search API and returns the top results
-func googleSearch(query string, numResults int) ([]SearchResult, error) {
+func GoogleSearch(query string, numResults int, images bool) ([]SearchResult, error) {
 	// These would typically be stored in environment variables or configuration
-	const searchKey = "YOUR_API_KEY"               // Replace with actual API key in production
-	const searchEngineID = "YOUR_SEARCH_ENGINE_ID" // Replace with actual search engine ID in production
 
 	if numResults <= 0 {
 		numResults = 5 // Default to 5 results if not specified or invalid
@@ -160,11 +117,15 @@ func googleSearch(query string, numResults int) ([]SearchResult, error) {
 	params.Add("key", searchKey)                     // API key
 	params.Add("cx", searchEngineID)                 // Search engine ID
 	params.Add("num", fmt.Sprintf("%d", numResults)) // Number of results
+	if images {
+		params.Add("searchType", "image") // Search for images
+		//params.Add("imgSize", "MEDIUM")
+	}
 
 	searchURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
 
 	// Get a custom HTTP client with Zscaler support
-	client, err := getCustomHTTPClient()
+	client, err := transport.GetCustomHTTPClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP client: %w", err)
 	}
@@ -176,7 +137,11 @@ func googleSearch(query string, numResults int) ([]SearchResult, error) {
 	}
 
 	// Make the HTTP request
-	logger.Info("Performing Google Custom Search for query", query)
+	if images {
+		logger.Info("Performing Google Image Search for query", query)
+	} else {
+		logger.Info("Performing Google Search for query", query)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to search API: %w", err)

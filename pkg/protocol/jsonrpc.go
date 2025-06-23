@@ -35,6 +35,8 @@ const (
 	MethodToolsList     MethodType = "tools/list"
 	MethodToolsCall     MethodType = "tools/call"
 	MethodResourcesList MethodType = "resources/list"
+	MethodPromptsList   MethodType = "prompts/list"
+	MethodRulesList     MethodType = "rules/list"
 	MethodShutdown      MethodType = "shutdown"
 	MethodExit          MethodType = "exit"
 	MethodCancelRequest MethodType = "$/cancelRequest"
@@ -55,12 +57,11 @@ const (
 	MethodToolResult    MethodType = "tool/result"
 	MethodDiscoverTools MethodType = "discover_tools"
 	MethodInvokeTool    MethodType = "invoke_tool"
-
-	// Custom MCP methods
-	MethodCalculate MethodType = "mcp/calculate"
-	MethodWeather   MethodType = "mcp/weather"
-	MethodTimer     MethodType = "mcp/timer"
 )
+
+//////////////
+/// JSONRPC
+//////////////
 
 // Version is the JSON-RPC protocol version
 const JsonRpcVersion = "2.0"
@@ -79,7 +80,7 @@ type JsonRpcRequest struct {
 
 	// An identifier established by the Client that MUST contain a String, Number, or NULL value if included.
 	// If it is not included it is assumed to be a notification.
-	ID interface{} `json:"id,omitempty"`
+	ID any `json:"id,omitempty"`
 }
 
 // Response represents a JSON-RPC 2.0 response object
@@ -98,7 +99,7 @@ type JsonRpcResponse struct {
 	// This member is REQUIRED.
 	// It MUST be the same as the value of the id member in the Request Object.
 	// If there was an error in detecting the id in the Request object (e.g. Parse error/Invalid Request), it MUST be Null.
-	ID any `json:"id"`
+	ID any `json:"id,omitempty"`
 }
 
 // Error represents a JSON-RPC 2.0 error object
@@ -113,6 +114,10 @@ type JsonRpcError struct {
 	// This may be omitted.
 	Data any `json:"data,omitempty"`
 }
+
+//////////////
+/// TOOLS
+//////////////
 
 type ToolProperty struct {
 	Type        string `json:"type"`
@@ -138,7 +143,12 @@ type ToolsResponse struct {
 	Tools []Tool `json:"tools"`
 }
 
+//////////////
+/// RESOURCES
+//////////////
+
 // Resource represents a resource that can be accessed by Amazon Q, a document or other non-interactive resource
+// https://modelcontextprotocol.io/docs/concepts/resources
 type Resource struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -148,7 +158,27 @@ type Resource struct {
 
 // ToolsResponse represents the response to a tools discovery request
 type ResourceResponse struct {
-	Tools []Resource `json:"resources"`
+	Resources []Resource `json:"resources"`
+}
+
+//////////////
+/// PROMPTS
+//////////////
+
+// PromptArgument represents an 'argument' in the prompt
+type PromptArgument struct {
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+// StoredPrompt represents a prompt stored in the registry
+type Prompt struct {
+	ID          string                    `json:"id"`
+	Description string                    `json:"description,omitempty"`
+	Content     string                    `json:"content"`
+	Tags        []string                  `json:"tags"`
+	Variables   map[string]PromptArgument `json:"arguments"`
+	Metadata    map[string]any            `json:"metadata"`
 }
 
 // Standard error codes defined by the JSON-RPC 2.0 specification
@@ -176,11 +206,6 @@ const (
 	ErrToolExecutionFailed = -32000
 )
 
-// Error returns a string representation of the error
-func (e *JsonRpcError) Error() string {
-	return fmt.Sprintf("jsonrpc error: code=%d message=%s", e.Code, e.Message)
-}
-
 // NewRequest creates a new JSON-RPC 2.0 request
 func NewJsonRpcRequest(method string, params interface{}, id interface{}) (*JsonRpcRequest, error) {
 	var paramsJSON json.RawMessage
@@ -207,7 +232,7 @@ func NewJsonRpcNotification(method string, params interface{}) (*JsonRpcRequest,
 }
 
 // NewResponse creates a new JSON-RPC 2.0 success response
-func NewJsonRpcResponse(result interface{}, id interface{}) (*JsonRpcResponse, error) {
+func NewJsonRpcResponse(result any, id any) (*JsonRpcResponse, error) {
 	var resultJSON json.RawMessage
 	var err error
 
@@ -225,16 +250,40 @@ func NewJsonRpcResponse(result interface{}, id interface{}) (*JsonRpcResponse, e
 	}, nil
 }
 
+// Error returns a string representation of the error
+func (e *JsonRpcError) Error() string {
+	return fmt.Sprintf("jsonrpc error: code=%d message=%s", e.Code, e.Message)
+}
+
+// Takes the given values and puts them into a JsonRpcError structure
+func CreateError(code int, message string, data any) *JsonRpcError {
+	return &JsonRpcError{
+		Code:    code,
+		Message: message,
+		Data:    data,
+	}
+}
+
+func WrapError(err error, code int) *JsonRpcError {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	} else {
+		msg = ""
+	}
+	return &JsonRpcError{
+		Code:    code,
+		Message: msg,
+	}
+}
+
 // NewErrorResponse creates a new JSON-RPC 2.0 error response
-func NewJsonRpcErrorResponse(code int, message string, data interface{}, id interface{}) *JsonRpcResponse {
+func NewJsonRpcErrorResponse(code int, message string, data any, id any) *JsonRpcResponse {
+	err := CreateError(code, message, data)
 	return &JsonRpcResponse{
 		JsonRPC: JsonRpcVersion,
-		Error: &JsonRpcError{
-			Code:    code,
-			Message: message,
-			Data:    data,
-		},
-		ID: id,
+		Error:   err,
+		ID:      id,
 	}
 }
 

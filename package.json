@@ -1,0 +1,17 @@
+{
+  "name": "mcp",
+  "version": "1.0.0",
+  "description": "A Model Context Protocol (MCP) server implementation for Amazon Q / Claude etc. A single cross platform executable containing multiple tools/resources/prompts etc.",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.53.0",
+    "@types/node": "^24.0.3"
+  }
+}

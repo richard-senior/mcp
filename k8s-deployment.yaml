@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: meme-server
+  labels:
+    app: meme-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: meme-server
+  template:
+    metadata:
+      labels:
+        app: meme-server
+    spec:
+      containers:
+      - name: meme-server
+        image: meme-server:latest
+        imagePullPolicy: Never  # Use local image
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: meme-server-service
+spec:
+  selector:
+    app: meme-server
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+      nodePort: 30080
+  type: NodePort

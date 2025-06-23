@@ -13,13 +13,18 @@ import (
 
 	"github.com/richard-senior/mcp/internal/logger"
 	"github.com/richard-senior/mcp/pkg/protocol"
+	"github.com/richard-senior/mcp/pkg/transport"
 )
 
 // WikipediaImageTool returns the Wikipedia image search tool definition
 func WikipediaImageTool() protocol.Tool {
 	return protocol.Tool{
-		Name:        "get_image",
-		Description: "Finds an image that matches the given query string and downloads it to the given location at the given image size",
+		Name: "get_image",
+		Description: `
+		Finds an image (gif, jpeg etc.) that matches the given query string and downloads it to the given location at the given image size
+		This tool should be used when the user asks for an image of something.
+		Outputs the downloaded image location
+		`,
 		InputSchema: protocol.InputSchema{
 			Type: "object",
 			Properties: map[string]protocol.ToolProperty{
@@ -28,8 +33,10 @@ func WikipediaImageTool() protocol.Tool {
 					Description: "The search string to be entered into google search",
 				},
 				"location": {
-					Type:        "string",
-					Description: "the directory into which the image should be downloaded, default is the present working directory",
+					Type: "string",
+					Description: `
+						the directory into which the image should be downloaded, defaults to the present working directory
+					`,
 				},
 				"size": {
 					Type:        "integer",
@@ -73,22 +80,15 @@ func HandleWikipediaImageTool(params any) (any, error) {
 	}
 
 	// Save the image
-	err := saveWikipediaImage(query, imageSize, outputPath)
+	ret, err := SaveWikipediaImage(query, imageSize, outputPath)
 	if err != nil {
 		return nil, err
 	}
-
-	// Return success
-	return map[string]interface{}{
-		"query":      query,
-		"size":       imageSize,
-		"outputPath": outputPath,
-		"success":    true,
-	}, nil
+	return ret, nil
 }
 
 // wikipediaImageSearch searches for an image on Wikipedia and returns the image bytes if found
-func wikipediaImageSearch(query string, imageSize int) ([]byte, string, error) {
+func WikipediaImageSearch(query string, imageSize int) ([]byte, string, error) {
 	// Default image size if not specified or invalid
 	if imageSize <= 0 {
 		imageSize = 500
@@ -128,6 +128,24 @@ func wikipediaImageSearch(query string, imageSize int) ([]byte, string, error) {
 		logger.Info("Search failed for variation:", searchTerm, "- trying next variation")
 	}
 
+	logger.Info("Wikipedia returned nothing.. Calling Google Image Search")
+	ret, err := GoogleSearch(query, 1, true)
+	if err != nil || ret == nil {
+		return nil, "No image found for any variation of query, and google search failed", err
+	}
+
+	// Just get the first image that is returned
+	for _, i := range ret {
+		if i.URL == "" {
+			continue
+		}
+		ib, t, err := transport.GetImage(i.URL)
+		if err != nil {
+			continue
+		}
+		return ib, t, nil
+	}
+
 	// If we get here, all variations failed
 	return nil, "", fmt.Errorf("no image found for any variation of query: %s", query)
 }
@@ -148,7 +166,7 @@ func tryWikipediaImageSearch(query string, imageSize int) ([]byte, string, error
 	searchURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
 
 	// Get a custom HTTP client with Zscaler support
-	client, err := getCustomHTTPClient()
+	client, err := transport.GetCustomHTTPClient()
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create HTTP client: %w", err)
 	}
@@ -220,34 +238,9 @@ func tryWikipediaImageSearch(query string, imageSize int) ([]byte, string, error
 	// Now fetch the actual image
 	logger.Info("Found image for", query, "at URL:", imageURL)
 
-	// Create a request for the image
-	imgReq, err := http.NewRequest("GET", imageURL, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to create image request: %w", err)
-	}
-
-	// Make the HTTP request for the image
-	imgResp, err := client.Do(imgReq)
+	imageData, contentType, err := transport.GetImage(imageURL)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to fetch image: %w", err)
-	}
-	defer imgResp.Body.Close()
-
-	// Check if the response status code is not 200 OK
-	if imgResp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("image request returned error status %d", imgResp.StatusCode)
-	}
-
-	// Check if the response is actually an image
-	contentType := imgResp.Header.Get("Content-Type")
-	if !strings.HasPrefix(contentType, "image/") {
-		return nil, "", fmt.Errorf("response is not an image, content type: %s", contentType)
-	}
-
-	// Read the image data
-	imageData, err := io.ReadAll(imgResp.Body)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to read image data: %w", err)
 	}
 
 	logger.Info("Successfully retrieved image for", query, "with size:", len(imageData), "bytes")
@@ -256,7 +249,7 @@ func tryWikipediaImageSearch(query string, imageSize int) ([]byte, string, error
 }
 
 // saveWikipediaImage saves an image from Wikipedia to disk with the correct file extension
-func saveWikipediaImage(query string, imageSize int, outputPath string) error {
+func SaveWikipediaImage(query string, imageSize int, outputPath string) (any, error) {
 	// Trim leading and trailing spaces from the query
 	query = strings.TrimSpace(query)
 
@@ -272,9 +265,9 @@ func saveWikipediaImage(query string, imageSize int, outputPath string) error {
 	}
 
 	// Get the image data and content type
-	imageData, contentType, err := wikipediaImageSearch(query, imageSize)
+	imageData, contentType, err := WikipediaImageSearch(query, imageSize)
 	if err != nil {
-		return fmt.Errorf("failed to get image: %w", err)
+		return nil, fmt.Errorf("failed to get image: %w", err)
 	}
 
 	// Determine the file extension based on content type
@@ -287,6 +280,8 @@ func saveWikipediaImage(query string, imageSize int, outputPath string) error {
 		extension = "jpg"
 	} else if strings.Contains(contentType, "webp") {
 		extension = "webp"
+	} else if strings.Contains(contentType, "svg") {
+		extension = "svg"
 	}
 
 	// If the output path doesn't have an extension, add one
@@ -301,16 +296,19 @@ func saveWikipediaImage(query string, imageSize int, outputPath string) error {
 	dir := filepath.Dir(outputPath)
 	if dir != "." && dir != "/" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
+			return nil, fmt.Errorf("failed to create directory: %w", err)
 		}
 	}
 
 	// Write the image data to disk
 	err = os.WriteFile(outputPath, imageData, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to write image to disk: %w", err)
+		return nil, fmt.Errorf("failed to write image to disk: %w", err)
 	}
 
 	logger.Info("Image saved to", outputPath)
-	return nil
+
+	return map[string]any{
+		"location": outputPath,
+	}, nil
 }

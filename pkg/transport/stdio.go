@@ -99,7 +99,7 @@ func (t *StdioTransport) ReadRequest() (*protocol.JsonRpcRequest, error) {
 		return nil, err
 	}
 
-	logger.Info("Received JSON-RPC request:", request.Method, "with ID:", request.ID)
+	// logger.Info("Received JSON-RPC request:", request.Method, "with ID:", request.ID)
 	return request, nil
 }
 
