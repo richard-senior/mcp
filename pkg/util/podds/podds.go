@@ -34,9 +34,9 @@ func NewPodds() *Podds {
 // and are more than one hour away from being played.
 
 func (p *Podds) Update() error {
-	ds := GetFotmobInstance()
+	ds := GetDatasourceInstance()
 	if ds == nil {
-		return fmt.Errorf("failed to load or init the Fotmob datasource")
+		return fmt.Errorf("failed to load or init the datasource")
 	}
 	return nil
 }

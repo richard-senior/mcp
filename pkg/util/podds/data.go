@@ -372,32 +372,36 @@ func (m *Data) GetDataForTeam(t any) (*TeamData, error) {
 	id, err := util.GetAsInteger(t)
 	if err == nil {
 		// search teamdata for a matching team id
-		for _, team := range m.TeamsData {
+		for name, team := range m.TeamsData {
 			if team.Id == id {
+				// Populate the Name field since it's not stored in the JSON structure
+				team.Name = name
 				return &team, nil
 			}
 		}
-		return &TeamData{}, fmt.Errorf("Failed to find team data for team with id: %w", id)
+		return &TeamData{}, fmt.Errorf("Failed to find team data for team with id: %d", id)
 	}
 
 	// Ok we've been given a team name in some form
 	tn, err := util.GetAsString(t)
 	if err != nil {
 		return &TeamData{}, fmt.Errorf("Failed to convert team name to string: %w", err)
-
 	}
-	for _, team := range m.TeamsData {
-		if team.Name == tn {
+	
+	// First try exact match with map key
+	if team, exists := m.TeamsData[tn]; exists {
+		team.Name = tn
+		return &team, nil
+	}
+	
+	// Now try fuzzy search against map keys
+	for name, team := range m.TeamsData {
+		if util.IsFuzzyMatch(name, tn) {
+			team.Name = name
 			return &team, nil
 		}
 	}
-	// now try doing fuzzy search
-	for _, team := range m.TeamsData {
-		if util.IsFuzzyMatch(team.Name, tn) {
-			return &team, nil
-		}
-	}
-	return &TeamData{}, fmt.Errorf("Failed to find team data for team with name: %w", tn)
+	return &TeamData{}, fmt.Errorf("Failed to find team data for team with name: %s", tn)
 }
 
 // returns the lat/long for the given team (name or id)

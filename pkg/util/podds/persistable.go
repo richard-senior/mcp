@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"strings"
 
-	_ "modernc.org/sqlite"
 	"github.com/richard-senior/mcp/internal/logger"
+	_ "modernc.org/sqlite"
 )
 
 var db *sql.DB
@@ -46,6 +46,11 @@ func CloseDatabase() error {
 		return db.Close()
 	}
 	return nil
+}
+
+// GetDB returns the database connection for testing purposes
+func GetDB() *sql.DB {
+	return db
 }
 
 // createTables creates all necessary database tables
@@ -109,12 +114,18 @@ func generateCreateTableSQL(obj interface{}, tableName string) string {
 
 	var columns []string
 	var primaryKeys []string
+	var foreignKeys []string
 
 	for i := 0; i < objType.NumField(); i++ {
 		field := objType.Field(i)
 
 		// Skip unexported fields
 		if !field.IsExported() {
+			continue
+		}
+
+		// Skip fields marked as non-persistable
+		if field.Tag.Get("persist") == "false" || field.Tag.Get("db") == "-" {
 			continue
 		}
 
@@ -139,12 +150,41 @@ func generateCreateTableSQL(obj interface{}, tableName string) string {
 		}
 
 		columns = append(columns, fmt.Sprintf("%s %s", columnName, dbType))
+
+		// Check for foreign key - format: "table.column"
+		if fkRef := field.Tag.Get("fk"); fkRef != "" {
+			fkParts := strings.Split(fkRef, ".")
+			if len(fkParts) == 2 {
+				referencedTable := fkParts[0]
+				referencedColumn := fkParts[1]
+
+				// Get foreign key action (default to RESTRICT)
+				onDelete := field.Tag.Get("fk_delete")
+				if onDelete == "" {
+					onDelete = "RESTRICT"
+				}
+
+				onUpdate := field.Tag.Get("fk_update")
+				if onUpdate == "" {
+					onUpdate = "RESTRICT"
+				}
+
+				fkConstraint := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s(%s) ON DELETE %s ON UPDATE %s",
+					columnName, referencedTable, referencedColumn, onDelete, onUpdate)
+				foreignKeys = append(foreignKeys, fkConstraint)
+			}
+		}
 	}
 
 	// Add compound primary key constraint if we have multiple primary keys
 	if len(primaryKeys) > 0 {
 		pkConstraint := fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(primaryKeys, ", "))
 		columns = append(columns, pkConstraint)
+	}
+
+	// Add foreign key constraints
+	for _, fk := range foreignKeys {
+		columns = append(columns, fk)
 	}
 
 	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)", tableName, strings.Join(columns, ", "))
@@ -277,6 +317,11 @@ func getInsertData(obj interface{}) ([]string, []string, []interface{}) {
 			continue
 		}
 
+		// Skip fields marked as non-persistable
+		if field.Tag.Get("persist") == "false" || field.Tag.Get("db") == "-" {
+			continue
+		}
+
 		// Skip fields without database type
 		if field.Tag.Get("dbtype") == "" {
 			continue
@@ -315,6 +360,11 @@ func getUpdateData(obj interface{}) ([]string, []interface{}) {
 
 		// Skip unexported fields
 		if !field.IsExported() {
+			continue
+		}
+
+		// Skip fields marked as non-persistable
+		if field.Tag.Get("persist") == "false" || field.Tag.Get("db") == "-" {
 			continue
 		}
 

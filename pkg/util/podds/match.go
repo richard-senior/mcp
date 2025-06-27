@@ -3,6 +3,7 @@ package podds
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -21,7 +22,7 @@ type Match struct {
 	// Info
 	UTCTime  time.Time `json:"utcTime" column:"utcTime" dbtype:"DATETIME" index:"true"`
 	Round    string    `json:"round" column:"round" dbtype:"TEXT" index:"true"`
-	LeagueID int       `json:"leagueId" column:"leagueId" dbtype:"INTEGER" index:"true"`
+	LeagueID int       `json:"leagueId" column:"leagueId" dbtype:"INTEGER DEFAULT -1" index:"true"`
 	Season   string    `json:"season" column:"season" dbtype:"TEXT" index:"true"`
 	Status   string    `json:"status" column:"status" dbtype:"TEXT"` // "finished", "scheduled", "cancelled", etc.
 
@@ -34,13 +35,27 @@ type Match struct {
 	// Core match data (compressed from complex status fields)
 	ActualHomeGoals int `json:"actualHomeGoals" column:"actualHomeGoals" dbtype:"INTEGER DEFAULT -1"`
 	ActualAwayGoals int `json:"actualAwayGoals" column:"actualAwayGoals" dbtype:"INTEGER DEFAULT -1"`
-	// Prediciton
+	
+	// Poisson Prediction Fields
 	PoissonPredictedHomeGoals int `json:"poissonPredictedHomeGoals,omitempty" column:"poissonPredictedHomeGoals" dbtype:"INTEGER DEFAULT -1" `
 	PoissonPredictedAwayGoals int `json:"poissonPredictedAwayGoals,omitempty" column:"poissonPredictedAwayGoals" dbtype:"INTEGER DEFAULT -1" `
+	
+	// Expected Goals (from Poisson calculation)
+	HomeTeamGoalExpectency float64 `json:"homeTeamGoalExpectency,omitempty" column:"homeTeamGoalExpectency" dbtype:"REAL DEFAULT -1.0"`
+	AwayTeamGoalExpectency float64 `json:"awayTeamGoalExpectency,omitempty" column:"awayTeamGoalExpectency" dbtype:"REAL DEFAULT -1.0"`
+	
+	// Win/Draw/Loss Probabilities (percentages)
+	PoissonHomeWinProbability float64 `json:"poissonHomeWinProbability,omitempty" column:"poissonHomeWinProbability" dbtype:"REAL DEFAULT -1.0"`
+	PoissonDrawProbability    float64 `json:"poissonDrawProbability,omitempty" column:"poissonDrawProbability" dbtype:"REAL DEFAULT -1.0"`
+	PoissonAwayWinProbability float64 `json:"poissonAwayWinProbability,omitempty" column:"poissonAwayWinProbability" dbtype:"REAL DEFAULT -1.0"`
+	
+	// Over/Under Goals Probabilities (percentages)
+	Over1p5Goals float64 `json:"over1p5Goals,omitempty" column:"over1p5Goals" dbtype:"REAL DEFAULT -1.0"`
+	Over2p5Goals float64 `json:"over2p5Goals,omitempty" column:"over2p5Goals" dbtype:"REAL DEFAULT -1.0"`
 
 	// Match details
 	MatchUrl string `json:"pageUrl" column:"matchUrl" dbtype:"TEXT"`
-	Poke     int    `json:"poke,omitempty" column:"poke" dbtype:"INTEGER"`
+	Poke     int    `json:"poke,omitempty" column:"poke" dbtype:"INTEGER DEFAULT -1"`
 	Referee  string `json:"referee,omitempty" column:"referee" dbtype:"TEXT"`
 
 	// Metadata
@@ -113,6 +128,25 @@ func (m *Match) AfterDelete() error {
 // ProcessMatchData processes and compresses incoming data
 func (m *Match) ProcessMatchData() {
 	m.deriveStatus()
+	m.calculatePoke()
+}
+
+// calculatePoke calculates the travel distance between home and away teams
+func (m *Match) calculatePoke() {
+	if m.HomeID == "" || m.AwayID == "" {
+		logger.Debug("Cannot calculate poke: missing team IDs")
+		return
+	}
+
+	distance := CalculateDistanceForTeamIDs(m.HomeID, m.AwayID)
+	if distance > 0.0 {
+		// Convert to int as per original Python implementation
+		m.Poke = int(math.Round(distance))
+		logger.Debug("Calculated poke distance", m.Poke, "miles for", m.HomeTeamName, "vs", m.AwayTeamName)
+	} else {
+		logger.Debug("No distance data for teams", m.HomeTeamName, "vs", m.AwayTeamName)
+		m.Poke = -1
+	}
 }
 
 // deriveStatus sets a simple status based on the match data
@@ -175,7 +209,7 @@ func ParseMatchFromJSON(jsonData []byte) (*Match, error) {
 		return nil, err
 	}
 
-	match := &Match{}
+	match := NewMatch()
 
 	// Extract and process core fields
 	match.extractCoreFields(rawData)
@@ -187,6 +221,26 @@ func ParseMatchFromJSON(jsonData []byte) (*Match, error) {
 	match.ProcessMatchData()
 
 	return match, nil
+}
+
+// NewMatch creates a new Match with default values for numeric fields
+// All numeric fields default to -1 (int) or -1.0 (float64) to distinguish from valid zero values
+func NewMatch() *Match {
+	return &Match{
+		LeagueID:                  -1,
+		ActualHomeGoals:           -1,
+		ActualAwayGoals:           -1,
+		PoissonPredictedHomeGoals: -1,
+		PoissonPredictedAwayGoals: -1,
+		HomeTeamGoalExpectency:    -1.0,
+		AwayTeamGoalExpectency:    -1.0,
+		PoissonHomeWinProbability: -1.0,
+		PoissonDrawProbability:    -1.0,
+		PoissonAwayWinProbability: -1.0,
+		Over1p5Goals:              -1.0,
+		Over2p5Goals:              -1.0,
+		Poke:                      -1,
+	}
 }
 
 // extractCoreFields pulls out the essential match data
@@ -350,30 +404,20 @@ func (m *Match) ToJSONStringIndented() (string, error) {
 func SaveMatches(matches []*Match) error {
 	logger.Info("Saving matches to database", len(matches))
 
-	// Filter out matches that already exist
-	var newMatches []Persistable
+	// Convert all matches to Persistable for BulkSave
+	// The Save function in persistable handles INSERT/UPDATE automatically
+	var persistableMatches []Persistable
 	for _, match := range matches {
-		exists, err := Exists(match)
-		if err != nil {
-			logger.Warn("Failed to check if match exists", match.ID, err)
-			continue
-		}
-
-		if !exists {
-			newMatches = append(newMatches, match)
-			logger.Debug("Will save new match", match.ID, match.HomeTeamName, "vs", match.AwayTeamName)
-		} else {
-			logger.Debug("Match already exists", match.ID, match.HomeTeamName, "vs", match.AwayTeamName)
-		}
+		persistableMatches = append(persistableMatches, match)
 	}
 
-	if len(newMatches) > 0 {
-		if err := BulkSave(newMatches); err != nil {
+	if len(persistableMatches) > 0 {
+		if err := BulkSave(persistableMatches); err != nil {
 			return fmt.Errorf("failed to bulk save matches: %w", err)
 		}
-		logger.Info("Bulk saved matches", len(newMatches))
+		logger.Info("Bulk saved/updated matches", len(persistableMatches))
 	} else {
-		logger.Info("No new matches to save")
+		logger.Info("No matches to save")
 	}
 
 	return nil

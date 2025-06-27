@@ -50,7 +50,7 @@ type Logger struct {
 }
 
 func init() {
-	defaultLogger = NewLogger(INFO)
+	defaultLogger = NewLogger(INFO)  // Reverted back to INFO
 	showDateTime = false
 }
 

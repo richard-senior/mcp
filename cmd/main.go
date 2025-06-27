@@ -26,9 +26,9 @@ func main() {
 		// Check for bulk load command
 		if len(os.Args) > 1 && os.Args[1] == "update-podds" {
 			logger.Info("Starting PODDS bulk data load...")
-			err := podds.GetFotmobInstance()
-			if err != nil {
-				logger.Error("Bulk load failed:", err)
+			ds := podds.GetDatasourceInstance()
+			if ds == nil {
+				logger.Error("Failed to initialize datasource")
 				os.Exit(1)
 			}
 			logger.Info("PODDS bulk data load completed successfully")

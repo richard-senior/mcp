@@ -5,7 +5,6 @@
 *.so
 *.dylib
 mcp
-.amazonq
 .assets
 .podds
 
@@ -36,11 +35,3 @@ go.work
 ehthumbs.db
 Thumbs.db
 
-# Playwright
-node_modules/
-/test-results/
-/playwright-report/
-/blob-report/
-/playwright/.cache/
-.amazonq/
-.assets/

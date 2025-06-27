@@ -14,8 +14,8 @@ import (
 	"github.com/richard-senior/mcp/pkg/util"
 )
 
-// FotmobDatasource provides methods to fetch data from Fotmob
-type FotmobDatasource struct {
+// Datasource provides methods to fetch football data from external sources
+type Datasource struct {
 	BaseURL      string
 	MatchesURL   string
 	LeaguesURL   string
@@ -28,15 +28,15 @@ type FotmobDatasource struct {
 }
 
 var (
-	fotmobInstance *FotmobDatasource
-	fotmobOnce     sync.Once
+	datasourceInstance *Datasource
+	datasourceOnce     sync.Once
 )
 
-// GetFotmobDatasource returns the singleton instance of FotmobDatasource
-func GetFotmobInstance() *FotmobDatasource {
-	fotmobOnce.Do(func() {
+// GetDatasource returns the singleton instance of Datasource
+func GetDatasourceInstance() *Datasource {
+	datasourceOnce.Do(func() {
 		baseURL := "https://www.fotmob.com/api"
-		fotmobInstance = &FotmobDatasource{
+		datasourceInstance = &Datasource{
 			BaseURL:      baseURL,
 			MatchesURL:   fmt.Sprintf("%s/matches?", baseURL),
 			LeaguesURL:   fmt.Sprintf("%s/leagues?", baseURL),
@@ -47,13 +47,12 @@ func GetFotmobInstance() *FotmobDatasource {
 			Teams:        make([]*Team, 0),
 			Matches:      make([]*Match, 0),
 		}
-		// now instantiate some of the member variables
-		err := fotmobInstance.Update()
+		err := datasourceInstance.Update()
 		if err != nil {
-			logger.Error("Error loading fotmob data", err)
+			logger.Error("Error loading data", err)
 		}
 	})
-	return fotmobInstance
+	return datasourceInstance
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -61,7 +60,7 @@ func GetFotmobInstance() *FotmobDatasource {
 /////////////////////////////////////////////////////////////////////////
 
 // BulkLoadData loads match data for specified leagues and seasons
-func (datasource *FotmobDatasource) Update() error {
+func (datasource *Datasource) Update() error {
 	// Initialize database
 	if err := InitDatabase(poddsDbPath); err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
@@ -80,15 +79,25 @@ func (datasource *FotmobDatasource) Update() error {
 
 	logger.Info("Starting bulk data load for leagues", Leagues, "seasons", Seasons)
 
-	// Load data for each league/season combination
+	// to start Load data for each league/season combination from fotmob
 	for _, leagueID := range Leagues {
 		for _, season := range Seasons {
 			logger.Info("Loading data for league", leagueID, "season", season)
+			
+			// Pre-load existing matches from database for this league/season
+			existingMatches, err := loadExistingMatches(leagueID, season)
+			if err != nil {
+				logger.Warn("Failed to load existing matches for", leagueID, season, err)
+				existingMatches = make(map[string]*Match) // Empty cache on error
+			} else {
+				logger.Info("Pre-loaded", len(existingMatches), "existing matches for", leagueID, season)
+			}
+			
 			safeSeason := strings.ReplaceAll(season, "/", "-")
 			cacheFilename := fmt.Sprintf(poddsCachePath+"fotmob-%d-%s-league.json", leagueID, safeSeason)
 			var pageProps map[string]any
 			// load cache file if it exists
-			_, err := os.Stat(cacheFilename)
+			_, err = os.Stat(cacheFilename)
 			if err == nil {
 				// File exists, read from cache
 				cacheData, err := os.ReadFile(cacheFilename)
@@ -130,7 +139,7 @@ func (datasource *FotmobDatasource) Update() error {
 			}
 
 			// lets start by processing and bulk saving matches etc.
-			matches, err := datasource.extractMatches(pageProps)
+			matches, err := datasource.extractMatchesWithCache(pageProps, existingMatches)
 			if err != nil {
 				return fmt.Errorf("error extracting matches: %w", err)
 			}
@@ -147,12 +156,12 @@ func (datasource *FotmobDatasource) Update() error {
 			// Amend the teams list with any that are found in Fallback
 			fallbackTeams, err := datasource.getFallbackTeams(pageProps)
 			if err == nil && fallbackTeams != nil {
-				logger.Info("Got Fallback teams", len(fallbackTeams))
+				//logger.Info("Got Fallback teams", len(fallbackTeams))
 				for _, t := range datasource.Teams {
 					if !ExistsInTeamsArray(teams, t) {
 						tdata, err := TData.GetDataForTeam(t.ID)
 						if err == nil && tdata != nil {
-							logger.Highlight("Adding team ", tdata.Name)
+							//logger.Highlight("Adding team", tdata.Name)
 							foo := &Team{
 								ID:        tdata.Id,
 								Name:      tdata.Name,
@@ -170,7 +179,7 @@ func (datasource *FotmobDatasource) Update() error {
 				logger.Info("Didn't get fallback teams?", err)
 			}
 
-			// Now process poisson stats for all teams
+			// Now process team stats for all teams
 			if err := ProcessAndSaveTeamStats(matches, leagueID, season); err != nil {
 				return fmt.Errorf("failed to process team stats: %w", err)
 			}
@@ -182,9 +191,21 @@ func (datasource *FotmobDatasource) Update() error {
 			if err := SaveTeams(teams); err != nil {
 				return fmt.Errorf("failed to save teams: %w", err)
 			}
+
 			// cache matches on our instance
 			datasource.Matches = matches
-			// now save matches to the db
+
+			// Run Poisson predictions for future matches before saving
+			logger.Info("Running Poisson predictions for future matches")
+			for _, match := range matches {
+				err := PredictMatch(match)
+				if err != nil {
+					logger.Warn("Failed to predict match", match.HomeTeamName, "vs", match.AwayTeamName, err)
+					// Continue with other matches even if one fails
+				}
+			}
+
+			// Save matches to database
 			if err := SaveMatches(matches); err != nil {
 				return fmt.Errorf("failed to save matches: %w", err)
 			}
@@ -201,7 +222,7 @@ func (datasource *FotmobDatasource) Update() error {
 /////////////////////////////////////////////////////////////////////////
 
 // get performs an HTTP GET request to the specified URL
-func (f *FotmobDatasource) get(url string) ([]byte, error) {
+func (f *Datasource) get(url string) ([]byte, error) {
 	logger.Inform("HTTP get called for ", url)
 	ret, err := transport.GetHtml(url)
 	if err != nil {
@@ -211,7 +232,7 @@ func (f *FotmobDatasource) get(url string) ([]byte, error) {
 }
 
 // Uses the 'Fallback' section of the pageProps map to get any information about team name to team id mappings
-func (f *FotmobDatasource) getFallbackTeams(pageProps map[string]any) ([]*Team, error) {
+func (f *Datasource) getFallbackTeams(pageProps map[string]any) ([]*Team, error) {
 	fb, ok := pageProps["fallback"].(map[string]any)
 	if !ok {
 		return make([]*Team, 0), fmt.Errorf("could not find 'fallback' in pageProps")
@@ -265,9 +286,9 @@ func (f *FotmobDatasource) getFallbackTeams(pageProps map[string]any) ([]*Team, 
 	return ret, nil
 }
 
-// GetLeagueFromScreenScrape fetches match data for any given season by screen scraping the Fotmob website
+// GetLeagueFromScreenScrape fetches match data for any given season by screen scraping the external website
 // Does not cache, this method should be wrapped in a caching mechanism (which is why it's marked private)
-func (f *FotmobDatasource) getLeagueData(leagueID int, season string) (map[string]any, error) {
+func (f *Datasource) getLeagueData(leagueID int, season string) (map[string]any, error) {
 
 	// Validate inputs
 	if leagueID <= 0 {
@@ -287,7 +308,7 @@ func (f *FotmobDatasource) getLeagueData(leagueID int, season string) (map[strin
 	// Fetch the HTML content
 	htmlContent, err := f.get(url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch data from Fotmob: %w", err)
+		return nil, fmt.Errorf("failed to fetch data from external source: %w", err)
 	}
 	// Parse the HTML document
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(htmlContent)))
@@ -313,8 +334,106 @@ func (f *FotmobDatasource) getLeagueData(leagueID int, season string) (map[strin
 	return data, nil
 }
 
+// loadExistingMatches loads all existing matches for a specific league/season from database
+// Uses the existing persistable FindWhere function for consistency and proper ORM handling
+func loadExistingMatches(leagueID int, season string) (map[string]*Match, error) {
+	// Use the existing persistable FindWhere function
+	results, err := FindWhere(&Match{}, "leagueId = ? AND season = ?", leagueID, season)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find existing matches: %w", err)
+	}
+
+	matches := make(map[string]*Match)
+	
+	for _, result := range results {
+		if match, ok := result.(*Match); ok {
+			matches[match.ID] = match
+		} else {
+			logger.Warn("Unexpected type in FindWhere results, expected *Match")
+		}
+	}
+	
+	return matches, nil
+}
+
+// extractMatchesWithCache extracts and parses matches from pageProps data, using existing match cache
+func (f *Datasource) extractMatchesWithCache(pageProps map[string]any, existingMatches map[string]*Match) ([]*Match, error) {
+	var matches []*Match
+
+	// Navigate to matches.allMatches
+	matchesData, ok := pageProps["matches"].(map[string]any)
+	if !ok {
+		return matches, nil // Return empty slice if no matches found
+	}
+
+	allMatchesData, ok := matchesData["allMatches"].([]any)
+	if !ok {
+		return matches, nil // Return empty slice if no allMatches found
+	}
+
+	// Parse each match
+	for i, matchData := range allMatchesData {
+		// Convert match data to JSON bytes for parsing
+		matchJSON, err := json.Marshal(matchData)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling match %d to JSON: %w", i, err)
+		}
+
+		// Parse JSON into Match struct
+		newMatch, err := ParseMatchFromJSON(matchJSON)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing match %d: %w", i, err)
+		}
+
+		// Check if match already exists in database
+		if existingMatch, exists := existingMatches[newMatch.ID]; exists {
+			// Use existing match if it has predictions, otherwise use new match for re-processing
+			if existingMatch.PoissonPredictedHomeGoals != -1 {
+				logger.Debug("Using existing match with predictions:", existingMatch.HomeTeamName, "vs", existingMatch.AwayTeamName)
+				matches = append(matches, existingMatch)
+			} else {
+				logger.Debug("Re-processing match without predictions:", newMatch.HomeTeamName, "vs", newMatch.AwayTeamName)
+				// Copy any existing actual results to new match
+				if existingMatch.ActualHomeGoals != -1 {
+					newMatch.ActualHomeGoals = existingMatch.ActualHomeGoals
+					newMatch.ActualAwayGoals = existingMatch.ActualAwayGoals
+				}
+				// Copy existing metadata
+				newMatch.CreatedAt = existingMatch.CreatedAt
+				matches = append(matches, newMatch)
+			}
+		} else {
+			// New match, add to processing list
+			logger.Debug("Processing new match:", newMatch.HomeTeamName, "vs", newMatch.AwayTeamName)
+			matches = append(matches, newMatch)
+		}
+	}
+
+	// Log cache performance summary
+	var newMatches, existingWithPredictions, existingWithoutPredictions int
+	for _, match := range matches {
+		if _, exists := existingMatches[match.ID]; exists {
+			if match.PoissonPredictedHomeGoals != -1 {
+				existingWithPredictions++
+			} else {
+				existingWithoutPredictions++
+			}
+		} else {
+			newMatches++
+		}
+	}
+	
+	logger.Info("Match processing summary:", 
+		"New:", newMatches, 
+		"Existing with predictions:", existingWithPredictions,
+		"Existing without predictions:", existingWithoutPredictions,
+		"Total:", len(matches))
+
+	return matches, nil
+}
+
 // extractMatches extracts and parses matches from pageProps data
-func (f *FotmobDatasource) extractMatches(pageProps map[string]any) ([]*Match, error) {
+func (f *Datasource) extractMatches(pageProps map[string]any) ([]*Match, error) {
 	var matches []*Match
 
 	// Navigate to matches.allMatches
@@ -352,13 +471,13 @@ func (f *FotmobDatasource) extractMatches(pageProps map[string]any) ([]*Match, e
 * TODO this and it's reciprocal GetNameForTeamID etc
  */
 func GetIdForTeamname(team any) (int, error) {
-	// use the fotmob datasource to get the raw json from any league page
+	// use the datasource to get the raw json from any league page
 	// in there is a section with id:shortname mappings for all teams
 	// under "Fallback.......Shortened"
 	return -1, nil
 }
 
-// Uses FotMob (remote httpto look up the full team name of a team for any given team ID
+// Uses external data source (remote http) to look up the full team name of a team for any given team ID
 func LookupTeamNameForId(id int) (string, error) {
 	ids, err := util.GetAsString(id)
 	if err != nil {
