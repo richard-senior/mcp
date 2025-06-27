@@ -8,39 +8,40 @@ import (
 	"time"
 
 	"github.com/richard-senior/mcp/internal/logger"
+	"github.com/richard-senior/mcp/pkg/util"
 )
 
 // Compile-time check to ensure Match implements Persistable interface
 var _ Persistable = (*Match)(nil)
 
-// Match represents a football match with database persistence annotations
+// Match represents a football match with database persistence and JSON processing annotations
 type Match struct {
 	// Primary key
 	ID string `json:"id" column:"id" dbtype:"TEXT" primary:"true" index:"true"`
+	// Info
+	UTCTime  time.Time `json:"utcTime" column:"utcTime" dbtype:"DATETIME" index:"true"`
+	Round    string    `json:"round" column:"round" dbtype:"TEXT" index:"true"`
+	LeagueID int       `json:"leagueId" column:"leagueId" dbtype:"INTEGER" index:"true"`
+	Season   string    `json:"season" column:"season" dbtype:"TEXT" index:"true"`
+	Status   string    `json:"status" column:"status" dbtype:"TEXT"` // "finished", "scheduled", "cancelled", etc.
 
 	// Home team fields
-	HomeID        string `json:"homeId" column:"home_team_id" dbtype:"TEXT NOT NULL" index:"true"`
-	HomeName      string `json:"homeName" column:"home_team_name" dbtype:"TEXT NOT NULL"`
-	HomeShortName string `json:"homeShortName" column:"home_team_short_name" dbtype:"TEXT NOT NULL"`
-
-	// Away team fields
-	AwayID        string `json:"awayId" column:"away_team_id" dbtype:"TEXT NOT NULL" index:"true"`
-	AwayName      string `json:"awayName" column:"away_team_name" dbtype:"TEXT NOT NULL"`
-	AwayShortName string `json:"awayShortName" column:"away_team_short_name" dbtype:"TEXT NOT NULL"`
-
-	// Match details
-	PageURL string `json:"pageUrl" column:"page_url" dbtype:"TEXT"`
-	Round   string `json:"round" column:"round" dbtype:"TEXT" index:"true"`
+	HomeTeamName string `json:"homeShortName" column:"homeTeamName" dbtype:"TEXT NOT NULL"`
+	AwayTeamName string `json:"awayShortName" column:"awayTeamName" dbtype:"TEXT NOT NULL"`
+	HomeID       string `json:"homeId" column:"homeId" dbtype:"TEXT NOT NULL" index:"true"`
+	AwayID       string `json:"awayId" column:"awayId" dbtype:"TEXT NOT NULL" index:"true"`
 
 	// Core match data (compressed from complex status fields)
-	ActualHomeGoals int       `json:"actualHomeGoals" column:"actual_home_goals" dbtype:"INTEGER DEFAULT -1"`
-	ActualAwayGoals int       `json:"actualAwayGoals" column:"actual_away_goals" dbtype:"INTEGER DEFAULT -1"`
-	UTCTime         time.Time `json:"utcTime" column:"utc_time" dbtype:"DATETIME" index:"true"`
-	Status          string    `json:"status" column:"status" dbtype:"TEXT"` // "finished", "scheduled", "cancelled", etc.
+	ActualHomeGoals int `json:"actualHomeGoals" column:"actualHomeGoals" dbtype:"INTEGER DEFAULT -1"`
+	ActualAwayGoals int `json:"actualAwayGoals" column:"actualAwayGoals" dbtype:"INTEGER DEFAULT -1"`
+	// Prediciton
+	PoissonPredictedHomeGoals int `json:"poissonPredictedHomeGoals,omitempty" column:"poissonPredictedHomeGoals" dbtype:"INTEGER DEFAULT -1" `
+	PoissonPredictedAwayGoals int `json:"poissonPredictedAwayGoals,omitempty" column:"poissonPredictedAwayGoals" dbtype:"INTEGER DEFAULT -1" `
 
-	// League and season information (following PODDS pattern)
-	LeagueID int    `json:"leagueId" column:"league_id" dbtype:"INTEGER" index:"true"`
-	Season   string `json:"season" column:"season" dbtype:"TEXT" index:"true"`
+	// Match details
+	MatchUrl string `json:"pageUrl" column:"matchUrl" dbtype:"TEXT"`
+	Poke     int    `json:"poke,omitempty" column:"poke" dbtype:"INTEGER"`
+	Referee  string `json:"referee,omitempty" column:"referee" dbtype:"TEXT"`
 
 	// Metadata
 	CreatedAt time.Time `json:"createdAt" column:"created_at" dbtype:"DATETIME DEFAULT CURRENT_TIMESTAMP"`
@@ -196,7 +197,7 @@ func (m *Match) extractCoreFields(data map[string]interface{}) {
 	}
 
 	if pageUrl, ok := data["pageUrl"].(string); ok {
-		m.PageURL = pageUrl
+		m.MatchUrl = pageUrl
 	}
 
 	if round, ok := data["round"].(string); ok {
@@ -223,11 +224,8 @@ func (m *Match) extractCoreFields(data map[string]interface{}) {
 		if id, ok := home["id"].(string); ok {
 			m.HomeID = id
 		}
-		if name, ok := home["name"].(string); ok {
-			m.HomeName = name
-		}
 		if shortName, ok := home["shortName"].(string); ok {
-			m.HomeShortName = shortName
+			m.HomeTeamName = shortName
 		}
 	}
 
@@ -236,11 +234,8 @@ func (m *Match) extractCoreFields(data map[string]interface{}) {
 		if id, ok := away["id"].(string); ok {
 			m.AwayID = id
 		}
-		if name, ok := away["name"].(string); ok {
-			m.AwayName = name
-		}
 		if shortName, ok := away["shortName"].(string); ok {
-			m.AwayShortName = shortName
+			m.AwayTeamName = shortName
 		}
 	}
 }
@@ -366,9 +361,9 @@ func SaveMatches(matches []*Match) error {
 
 		if !exists {
 			newMatches = append(newMatches, match)
-			logger.Debug("Will save new match", match.ID, match.HomeName, "vs", match.AwayName)
+			logger.Debug("Will save new match", match.ID, match.HomeTeamName, "vs", match.AwayTeamName)
 		} else {
-			logger.Debug("Match already exists", match.ID, match.HomeName, "vs", match.AwayName)
+			logger.Debug("Match already exists", match.ID, match.HomeTeamName, "vs", match.AwayTeamName)
 		}
 	}
 
@@ -392,10 +387,20 @@ func ExtractTeamsFromMatches(matches []*Match) []*Team {
 		// Add home team
 		if match.HomeID != "" {
 			if _, exists := teamMap[match.HomeID]; !exists {
+				tid, err := util.GetAsInteger(match.HomeID)
+				if err != nil {
+					logger.Warn("Failed to convert team ID to integer", match.HomeID, err)
+					// TODO what to do here?
+				}
+				td, err := TData.GetDataForTeam(match.HomeID)
+				if err != nil {
+					logger.Warn("TeamID "+match.HomeID+" ( "+match.HomeTeamName+" ) does not exist in the data lookup table, you should add it", err)
+				}
 				teamMap[match.HomeID] = &Team{
-					ID:        match.HomeID,
-					Name:      match.HomeName,
-					ShortName: match.HomeShortName,
+					ID:        tid,
+					Name:      match.HomeTeamName,
+					Latitude:  td.Latitude,
+					Longitude: td.Longitude,
 				}
 			}
 		}
@@ -403,10 +408,20 @@ func ExtractTeamsFromMatches(matches []*Match) []*Team {
 		// Add away team
 		if match.AwayID != "" {
 			if _, exists := teamMap[match.AwayID]; !exists {
+				tid, err := util.GetAsInteger(match.AwayID)
+				if err != nil {
+					logger.Warn("Failed to convert team ID to integer", match.AwayID, err)
+					// TODO what to do here?
+				}
+				td, err := TData.GetDataForTeam(match.AwayID)
+				if err != nil {
+					logger.Warn("TeamID "+match.AwayID+" ( "+match.AwayTeamName+" ) does not exist in the data lookup table, you should add it", err)
+				}
 				teamMap[match.AwayID] = &Team{
-					ID:        match.AwayID,
-					Name:      match.AwayName,
-					ShortName: match.AwayShortName,
+					ID:        tid,
+					Name:      match.AwayTeamName,
+					Latitude:  td.Latitude,
+					Longitude: td.Longitude,
 				}
 			}
 		}
@@ -440,7 +455,7 @@ func GroupMatchesByRound(matches []*Match) map[int][]*Match {
 func ParseRoundNumber(roundStr string) int {
 	// Handle various round formats: "Round 1", "1", "Matchday 1", etc.
 	roundStr = strings.TrimSpace(roundStr)
-	
+
 	// Try to extract number from string
 	parts := strings.Fields(roundStr)
 	for _, part := range parts {
@@ -448,12 +463,12 @@ func ParseRoundNumber(roundStr string) int {
 			return num
 		}
 	}
-	
+
 	// If no number found, try parsing the whole string
 	if num, err := strconv.Atoi(roundStr); err == nil {
 		return num
 	}
-	
+
 	return 0 // Invalid round
 }
 
@@ -463,7 +478,7 @@ func GetSortedRounds(roundMatches map[int][]*Match) []int {
 	for round := range roundMatches {
 		rounds = append(rounds, round)
 	}
-	
+
 	// Simple bubble sort for small datasets
 	for i := 0; i < len(rounds)-1; i++ {
 		for j := 0; j < len(rounds)-i-1; j++ {
@@ -472,14 +487,14 @@ func GetSortedRounds(roundMatches map[int][]*Match) []int {
 			}
 		}
 	}
-	
+
 	return rounds
 }
 
 // GetTeamsFromMatches extracts unique team IDs from matches
 func GetTeamsFromMatches(matches []*Match) []string {
 	teamSet := make(map[string]bool)
-	
+
 	for _, match := range matches {
 		if match.HomeID != "" {
 			teamSet[match.HomeID] = true
@@ -488,11 +503,11 @@ func GetTeamsFromMatches(matches []*Match) []string {
 			teamSet[match.AwayID] = true
 		}
 	}
-	
+
 	teams := make([]string, 0, len(teamSet))
 	for teamID := range teamSet {
 		teams = append(teams, teamID)
 	}
-	
+
 	return teams
 }

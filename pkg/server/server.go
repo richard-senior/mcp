@@ -11,6 +11,7 @@ import (
 
 	"github.com/richard-senior/mcp/internal/logger"
 	"github.com/richard-senior/mcp/pkg/protocol"
+	"github.com/richard-senior/mcp/pkg/prompts"
 	"github.com/richard-senior/mcp/pkg/resources"
 	"github.com/richard-senior/mcp/pkg/tools"
 	"github.com/richard-senior/mcp/pkg/transport"
@@ -121,7 +122,24 @@ func (s *Server) RegisterDefaultTools() {
 
 // RegisterDefaultResources registers all the default resources with the server
 func (s *Server) RegisterDefaultPrompts() {
-	// load the prompts
+	logger.Info("Registering default prompts...")
+	
+	// Initialize the prompt registry which will create sample prompts
+	registry := prompts.GetGlobalRegistry()
+	
+	// Get all prompts from the registry
+	promptList, err := registry.ListPrompts()
+	if err != nil {
+		logger.Error("Failed to load prompts from registry", err)
+		return
+	}
+	
+	// Add prompts to server
+	mu.Lock()
+	s.prompts = promptList
+	mu.Unlock()
+	
+	logger.Info("Loaded prompts from registry", len(promptList))
 }
 
 // RegisterDefaultResources registers all the default resources with the server
@@ -144,7 +162,8 @@ func (s *Server) Start() error {
 	s.handlers[string(protocol.MethodToolsList)] = s.handleToolsList
 	//s.handlers[string(protocol.MethodResourcesList)] = s.handleResourcesList
 	s.handlers[string(protocol.MethodToolsCall)] = s.handleToolsCall
-	//s.handlers[string(protocol.MethodPromptsList)] = s.handlePromptsList
+	s.handlers[string(protocol.MethodPromptsList)] = s.handlePromptsList
+	s.handlers[string(protocol.MethodPromptsGet)] = s.handlePromptsGet
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -286,18 +305,90 @@ func (s *Server) handleRequest(req *protocol.JsonRpcRequest) *protocol.JsonRpcRe
 func (s *Server) handlePromptsList(params interface{}) (interface{}, error) {
 	logger.Info("Handling prompts/list request")
 
-	// Example response format from comment:
-	// {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"add","inputSchema":{"type":"object","properties":{"a":{"type":"number"},"b":{"type":"number"}},"required":["a","b"],"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"}}]}}
-
-	// Create a response structure that lists all registered tools
-	toolsResponse := struct {
-		Tools []protocol.Tool `json:"tools"`
-	}{
-		Tools: s.tools,
+	// Create simplified prompt entries for the list response
+	type PromptListEntry struct {
+		Name        string                    `json:"name"`
+		Description string                    `json:"description,omitempty"`
+		Arguments   map[string]protocol.PromptArgument `json:"arguments,omitempty"`
 	}
 
-	// Return the tools response directly - the handleRequest function will wrap it in a JSON-RPC response
-	return toolsResponse, nil
+	var promptList []PromptListEntry
+	for _, prompt := range s.prompts {
+		promptList = append(promptList, PromptListEntry{
+			Name:        prompt.ID, // Use ID as name for MCP compatibility
+			Description: prompt.Description,
+			Arguments:   prompt.Variables,
+		})
+	}
+
+	// Create a response structure that lists all registered prompts
+	promptsResponse := struct {
+		Prompts []PromptListEntry `json:"prompts"`
+	}{
+		Prompts: promptList,
+	}
+
+	return promptsResponse, nil
+}
+
+// handlePromptsGet handles the prompts/get method
+func (s *Server) handlePromptsGet(params interface{}) (interface{}, error) {
+	logger.Info("Handling prompts/get request")
+
+	// Parse the parameters to get the prompt name/ID
+	type PromptsGetParams struct {
+		Name      string            `json:"name"`
+		Arguments map[string]string `json:"arguments,omitempty"`
+	}
+
+	var getParams PromptsGetParams
+
+	// Convert params to JSON and then unmarshal it
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal params: %v", err)
+	}
+
+	if err := json.Unmarshal(paramsBytes, &getParams); err != nil {
+		return nil, fmt.Errorf("invalid prompts/get parameters: %v", err)
+	}
+
+	logger.Info("Prompt get requested for:", getParams.Name)
+
+	// Get the prompt from the registry
+	registry := prompts.GetGlobalRegistry()
+	prompt, err := registry.GetPrompt(getParams.Name)
+	if err != nil {
+		return nil, fmt.Errorf("prompt not found: %s", getParams.Name)
+	}
+
+	// Process the prompt content with any provided arguments
+	content := prompt.Content
+	if getParams.Arguments != nil {
+		for key, value := range getParams.Arguments {
+			placeholder := fmt.Sprintf("{{%s}}", key)
+			content = strings.ReplaceAll(content, placeholder, value)
+		}
+	}
+
+	// Return the processed prompt
+	response := struct {
+		Description string                 `json:"description"`
+		Messages    []protocol.PromptMessage `json:"messages"`
+	}{
+		Description: prompt.Description,
+		Messages: []protocol.PromptMessage{
+			{
+				Role: "user",
+				Content: protocol.PromptContent{
+					Type: "text",
+					Text: content,
+				},
+			},
+		},
+	}
+
+	return response, nil
 }
 
 // handleToolsList handles the tools/list method
@@ -354,7 +445,7 @@ func (s *Server) handleInitialize(params interface{}) (interface{}, error) {
 			// Tools are very much supported
 			"tools": struct{}{},
 			// Prompts are supported
-			// "prompts": struct{}{},
+			"prompts": struct{}{},
 			// Rules are not supported
 			//"rules": struct{}{},
 		},

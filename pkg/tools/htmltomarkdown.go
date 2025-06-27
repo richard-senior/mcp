@@ -98,11 +98,7 @@ func HandleURLToMarkdown(params any) (any, error) {
 		return nil, err
 	}
 
-	// Limit the size of the markdown if it's too large
-	const maxLength = 10000
-	if len(markdown) > maxLength {
-		markdown = markdown[:maxLength] + "\n\n... (content truncated due to size)"
-	}
+	// No size limit - return full markdown content
 
 	return map[string]any{
 		"markdown": markdown,

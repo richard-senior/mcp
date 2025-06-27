@@ -71,6 +71,15 @@ func GetCustomHTTPClient() (*http.Client, error) {
 	client := &http.Client{
 		Transport: customTransport,
 		Timeout:   30 * time.Second,
+		// CheckRedirect: nil means use default behavior (follow up to 10 redirects)
+		// You can customize this if needed
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Allow up to 10 redirects (default behavior)
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			return nil
+		},
 	}
 	httpClient = client
 	return client, nil

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/richard-senior/mcp/internal/logger"
@@ -22,17 +21,20 @@ func main() {
 	if len(os.Args) > 1 {
 		logger.Info("Command line arguments received:", len(os.Args)-1)
 		for i, arg := range os.Args[1:] {
-			logger.Debug(fmt.Sprintf("Argument %d:", i+1), arg)
+			logger.Info("Arg", i+1, ":", arg)
 		}
-
 		// Check for bulk load command
-		if len(os.Args) > 1 && os.Args[1] == "bulk-load-podds" {
+		if len(os.Args) > 1 && os.Args[1] == "update-podds" {
 			logger.Info("Starting PODDS bulk data load...")
-			if err := podds.BulkLoadData(); err != nil {
+			err := podds.GetFotmobInstance()
+			if err != nil {
 				logger.Error("Bulk load failed:", err)
 				os.Exit(1)
 			}
 			logger.Info("PODDS bulk data load completed successfully")
+			return
+		} else {
+			logger.Info("No command line arguments provided, returning")
 			return
 		}
 	} else {

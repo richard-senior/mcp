@@ -3,18 +3,18 @@ package podds
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/richard-senior/mcp/internal/logger"
+	"github.com/richard-senior/mcp/pkg/util"
 )
 
 // Team represents a team in a match with database persistence annotations
 type Team struct {
-	ID        string    `json:"id" column:"id" dbtype:"TEXT" primary:"true" index:"true"`
-	Name      string    `json:"name" column:"name" dbtype:"TEXT NOT NULL" index:"true"`
-	ShortName string    `json:"shortName" column:"short_name" dbtype:"TEXT NOT NULL"`
-	CreatedAt time.Time `json:"createdAt" column:"created_at" dbtype:"DATETIME DEFAULT CURRENT_TIMESTAMP"`
-	UpdatedAt time.Time `json:"updatedAt" column:"updated_at" dbtype:"DATETIME DEFAULT CURRENT_TIMESTAMP"`
+	ID          int     `json:"id" column:"id" dbtype:"INTEGER" primary:"true" index:"true"`
+	Name        string  `json:"shortName" column:"name" dbtype:"TEXT NOT NULL"`
+	CurrentForm int     `json:"form,omitempty" column:"currentForm" dbtype:"INTEGER"`
+	Latitude    float64 `json:"latitude,omitempty" column:"latitude" dbtype:"REAL"`
+	Longitude   float64 `json:"longitude,omitempty" column:"longitude" dbtype:"REAL"`
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -22,38 +22,31 @@ type Team struct {
 /////////////////////////////////////////////////////////////////////////
 
 // GetPrimaryKey returns the primary key as a map
-func (t *Team) GetPrimaryKey() map[string]interface{} {
-	return map[string]interface{}{
+func (t *Team) GetPrimaryKey() map[string]any {
+	return map[string]any{
 		"id": t.ID,
 	}
 }
 
 // SetPrimaryKey sets the primary key from a map
-func (t *Team) SetPrimaryKey(pk map[string]interface{}) error {
+func (t *Team) SetPrimaryKey(pk map[string]any) error {
 	if id, ok := pk["id"]; ok {
-		if idStr, ok := id.(string); ok {
-			t.ID = idStr
-			return nil
+		tid, err := util.GetAsInteger(id)
+		if err != nil {
+			return fmt.Errorf("primary key 'id' must be an integer or string representation of an integer")
 		}
-		return fmt.Errorf("primary key 'id' must be a string")
+		t.ID = tid
 	}
 	return fmt.Errorf("primary key 'id' not found")
 }
 
 // GetTableName returns the table name for teams
 func (t *Team) GetTableName() string {
-	return "teams"
+	return "team"
 }
 
 // BeforeSave is called before saving the team
 func (t *Team) BeforeSave() error {
-	// Set timestamps
-	now := time.Now()
-	if t.CreatedAt.IsZero() {
-		t.CreatedAt = now
-	}
-	t.UpdatedAt = now
-
 	return nil
 }
 
@@ -71,6 +64,10 @@ func (t *Team) BeforeDelete() error {
 func (t *Team) AfterDelete() error {
 	return nil
 }
+
+/////////////////////////////////////////////////////////////////////////
+////// Util and access methods
+/////////////////////////////////////////////////////////////////////////
 
 /////////////////////////////////////////////////////////////////////////
 ////// Team Collection Operations
@@ -117,15 +114,15 @@ func SaveTeams(teams []*Team) error {
 func UpdateFormData(previousForm int, result int) int {
 	// Convert previous form from decimal to quaternary (base-4)
 	s := Quaternary(previousForm)
-	
+
 	// Add new result to the front (most recent)
 	s = fmt.Sprintf("%d%s", result, s)
-	
+
 	// Keep only last 5 results (rolling window)
 	if len(s) > 5 {
 		s = s[:5]
 	}
-	
+
 	// Convert back to decimal for storage
 	ret := 0
 	multiplier := 1
@@ -134,7 +131,7 @@ func UpdateFormData(previousForm int, result int) int {
 		ret += digit * multiplier
 		multiplier *= 4
 	}
-	
+
 	return ret
 }
 
@@ -143,13 +140,26 @@ func Quaternary(n int) string {
 	if n == 0 {
 		return "0"
 	}
-	
+
 	var nums []string
 	for n > 0 {
 		remainder := n % 4
 		nums = append([]string{fmt.Sprintf("%d", remainder)}, nums...)
 		n = n / 4
 	}
-	
+
 	return strings.Join(nums, "")
+}
+
+// Searches the Teams array for the given team (by ID)
+func ExistsInTeamsArray(teams []*Team, team *Team) bool {
+	if teams == nil || team == nil {
+		return false
+	}
+	for _, t := range teams {
+		if t.ID == team.ID {
+			return true
+		}
+	}
+	return false
 }

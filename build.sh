@@ -36,8 +36,8 @@ function read_properties {
 set -e
 
 echo "Building MCP application..."
-# Enable CGO for SQLite support
-CGO_ENABLED=1 go build -o mcp ./cmd/main.go
+# Using pure Go SQLite driver - no CGO required
+go build -o mcp ./cmd/main.go
 
 echo "Build complete. Binary is at: $(pwd)/mcp"
 echo "To use with Amazon Q, make sure your ~/.aws/amazonq/mcp.json points to this binary."

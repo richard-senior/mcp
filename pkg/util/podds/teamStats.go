@@ -56,8 +56,9 @@ type TeamStats struct {
 	AwayFormPercentage float64 `json:"awayFormPercentage" column:"away_form_percentage" dbtype:"REAL DEFAULT 0.0"`
 
 	// Points and position
-	Points   int `json:"points" column:"points" dbtype:"INTEGER DEFAULT 0"`
-	Position int `json:"position" column:"position" dbtype:"INTEGER DEFAULT 0"`
+	Points          int `json:"points" column:"points" dbtype:"INTEGER DEFAULT 0"`
+	Position        int `json:"position" column:"position" dbtype:"INTEGER DEFAULT 0"`
+	InitialPosition int `json:"initialposition,omitempty" column:"initialposition" dbtype:"INTEGER DEFAULT 0"`
 
 	// Metadata
 	CreatedAt time.Time `json:"createdAt" column:"created_at" dbtype:"DATETIME DEFAULT CURRENT_TIMESTAMP"`
@@ -181,10 +182,10 @@ func ProcessAndSaveTeamStats(matches []*Match, leagueID int, season string) erro
 
 	// Process each round in order
 	rounds := GetSortedRounds(roundMatches)
-	
+
 	for _, round := range rounds {
 		logger.Debug("Processing round", round, "for league", leagueID, "season", season)
-		
+
 		if err := ProcessRoundStats(roundMatches[round], leagueID, season, round); err != nil {
 			logger.Error("Failed to process round stats", round, err)
 			continue
@@ -196,16 +197,18 @@ func ProcessAndSaveTeamStats(matches []*Match, leagueID int, season string) erro
 }
 
 // ProcessRoundStats processes statistics for a specific round
+// TODO initial positions
+// TODO Round Averages
 func ProcessRoundStats(matches []*Match, leagueID int, season string, round int) error {
 	// Get all teams in this round
 	teams := GetTeamsFromMatches(matches)
-	
+
 	for _, teamID := range teams {
 		// Get previous round stats for cumulative calculation
 		var prevStats *TeamStats
 		if round > 1 {
 			prevStats = &TeamStats{}
-			pk := map[string]interface{}{
+			pk := map[string]any{
 				"team_id":   teamID,
 				"season":    season,
 				"round":     round - 1,
@@ -221,19 +224,21 @@ func ProcessRoundStats(matches []*Match, leagueID int, season string, round int)
 			// First round, start with empty stats
 			prevStats = &TeamStats{}
 		}
-		
+
 		// Calculate current round stats
 		currentStats := CalculateTeamStatsForRound(teamID, matches, prevStats, leagueID, season, round)
-		
+
 		// Save the stats using the generic Save method
 		if err := Save(currentStats); err != nil {
 			logger.Warn("Failed to save team stats", teamID, round, err)
 			continue
 		}
-		
+
 		logger.Debug("Saved stats for team", teamID, "round", round)
 	}
-	
+	Calculate round averages here and save them out
+	fix 'Adding team' when running test.sh
+
 	return nil
 }
 
@@ -244,7 +249,7 @@ func CalculateTeamStatsForRound(teamID string, matches []*Match, prevStats *Team
 		Season:   season,
 		Round:    round,
 		LeagueID: strconv.Itoa(leagueID),
-		
+
 		// Copy previous cumulative stats
 		GamesPlayed:     prevStats.GamesPlayed,
 		HomeGamesPlayed: prevStats.HomeGamesPlayed,
@@ -264,20 +269,20 @@ func CalculateTeamStatsForRound(teamID string, matches []*Match, prevStats *Team
 		HomeForm:        prevStats.HomeForm,
 		AwayForm:        prevStats.AwayForm,
 	}
-	
+
 	// Find matches involving this team in this round
 	for _, match := range matches {
 		if !match.HasBeenPlayed() {
 			continue // Skip unplayed matches
 		}
-		
+
 		if match.HomeID == teamID {
 			// Team played at home
 			stats.GamesPlayed++
 			stats.HomeGamesPlayed++
 			stats.HomeGoals += match.ActualHomeGoals
 			stats.HomeConceded += match.ActualAwayGoals
-			
+
 			// Determine result
 			if match.ActualHomeGoals > match.ActualAwayGoals {
 				stats.HomeWins++
@@ -294,14 +299,14 @@ func CalculateTeamStatsForRound(teamID string, matches []*Match, prevStats *Team
 				stats.Form = UpdateFormData(stats.Form, 1) // Loss
 				stats.HomeForm = UpdateFormData(stats.HomeForm, 1)
 			}
-			
+
 		} else if match.AwayID == teamID {
 			// Team played away
 			stats.GamesPlayed++
 			stats.AwayGamesPlayed++
 			stats.AwayGoals += match.ActualAwayGoals
 			stats.AwayConceded += match.ActualHomeGoals
-			
+
 			// Determine result
 			if match.ActualAwayGoals > match.ActualHomeGoals {
 				stats.AwayWins++
@@ -320,6 +325,6 @@ func CalculateTeamStatsForRound(teamID string, matches []*Match, prevStats *Team
 			}
 		}
 	}
-	
+
 	return stats
 }

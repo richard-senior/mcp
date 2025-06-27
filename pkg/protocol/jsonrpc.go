@@ -36,6 +36,7 @@ const (
 	MethodToolsCall     MethodType = "tools/call"
 	MethodResourcesList MethodType = "resources/list"
 	MethodPromptsList   MethodType = "prompts/list"
+	MethodPromptsGet    MethodType = "prompts/get"
 	MethodRulesList     MethodType = "rules/list"
 	MethodShutdown      MethodType = "shutdown"
 	MethodExit          MethodType = "exit"
@@ -174,11 +175,24 @@ type PromptArgument struct {
 // StoredPrompt represents a prompt stored in the registry
 type Prompt struct {
 	ID          string                    `json:"id"`
+	Name        string                    `json:"name,omitempty"`
 	Description string                    `json:"description,omitempty"`
 	Content     string                    `json:"content"`
 	Tags        []string                  `json:"tags"`
-	Variables   map[string]PromptArgument `json:"arguments"`
+	Variables   map[string]PromptArgument `json:"variables"`
 	Metadata    map[string]any            `json:"metadata"`
+}
+
+// PromptMessage represents a message in a prompt response
+type PromptMessage struct {
+	Role    string        `json:"role"`
+	Content PromptContent `json:"content"`
+}
+
+// PromptContent represents the content of a prompt message
+type PromptContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 // Standard error codes defined by the JSON-RPC 2.0 specification

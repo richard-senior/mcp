@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"github.com/richard-senior/mcp/internal/logger"
 )
 
@@ -26,7 +26,7 @@ type Persistable interface {
 // InitDatabase initializes the SQLite database connection
 func InitDatabase(dbPath string) error {
 	var err error
-	db, err = sql.Open("sqlite3", dbPath)
+	db, err = sql.Open("sqlite", dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
