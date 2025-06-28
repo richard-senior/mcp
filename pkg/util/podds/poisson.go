@@ -41,50 +41,21 @@ func PredictMatch(match *Match) error {
 		return nil
 	}
 
-	logger.Info("Predicting match", match.HomeTeamName, "vs", match.AwayTeamName, "on", match.UTCTime.Format("2006-01-02"))
-
-	// Log if this is a historical prediction for testing
-	if match.Season != "2025/2026" {
-		logger.Debug("Historical prediction for testing - Season:", match.Season)
-	}
-
 	// Debug log match details
-	logger.Debug("Match details:",
-		"HomeID:", match.HomeID,
-		"AwayID:", match.AwayID,
-		"LeagueID:", match.LeagueID,
-		"Season:", match.Season)
-
-	// Get team statistics for both teams
-	logger.Debug("Attempting to get home team stats for:", match.HomeID)
-	
 	// First, let's check what team stats exist for this season/league
 	debugTeamStatsAvailability(match.LeagueID, match.Season)
-	
+
 	homeStats, err := getTeamStats(match.HomeID, match.LeagueID, match.Season)
 	if err != nil {
 		logger.Warn("Could not get home team stats for prediction", match.HomeTeamName, err)
 		return err
 	}
 
-	logger.Debug("Attempting to get away team stats for:", match.AwayID)
 	awayStats, err := getTeamStats(match.AwayID, match.LeagueID, match.Season)
 	if err != nil {
 		logger.Warn("Could not get away team stats for prediction", match.AwayTeamName, err)
 		return err
 	}
-
-	// Debug log the team stats
-	logger.Debug("Home team stats:", match.HomeTeamName,
-		"HomeAttack:", homeStats.HomeAttackStrength,
-		"AwayAttack:", homeStats.AwayAttackStrength,
-		"HomeDefense:", homeStats.HomeDefenseStrength,
-		"AwayDefense:", homeStats.AwayDefenseStrength)
-	logger.Debug("Away team stats:", match.AwayTeamName,
-		"HomeAttack:", awayStats.HomeAttackStrength,
-		"AwayAttack:", awayStats.AwayAttackStrength,
-		"HomeDefense:", awayStats.HomeDefenseStrength,
-		"AwayDefense:", awayStats.AwayDefenseStrength)
 
 	// Get league averages for the season
 	leagueAvg, err := getLeagueAverages(match.LeagueID, match.Season)
@@ -107,8 +78,6 @@ func PredictMatch(match *Match) error {
 	match.Over1p5Goals = result.Over1p5GoalsProbability
 	match.Over2p5Goals = result.Over2p5GoalsProbability
 
-	logger.Highlight("Prediction:", match.HomeTeamName, match.PoissonPredictedHomeGoals, "-", match.PoissonPredictedAwayGoals, match.AwayTeamName)
-	logger.Info("Season:", match.Season, "Round:", match.Round)
 	return nil
 }
 
@@ -151,7 +120,6 @@ func shouldPredict(match *Match) bool {
 
 	// For historical seasons, predict if no existing prediction
 	// This allows us to test our predictions against historical results
-	logger.Debug("Predicting historical match for testing:", match.HomeTeamName, "vs", match.AwayTeamName, "on", match.UTCTime.Format("2006-01-02"))
 	return true
 }
 
@@ -271,13 +239,6 @@ func EvaluateAllPredictions(matches []*Match) *AggregateAccuracy {
 	aggregate.ResultAccuracy = float64(resultCorrectCount) / float64(aggregate.TotalMatches) * 100
 	aggregate.AverageGoalDiffError = float64(totalGoalDiffError) / float64(aggregate.TotalMatches)
 	aggregate.AverageTotalGoalsError = float64(totalGoalsError) / float64(aggregate.TotalMatches)
-
-	logger.Highlight("Prediction Accuracy Summary:")
-	logger.Highlight("Total matches evaluated:", aggregate.TotalMatches)
-	logger.Highlight("Exact score accuracy:", fmt.Sprintf("%.1f%%", aggregate.ExactScoreAccuracy))
-	logger.Highlight("Result accuracy (W/D/L):", fmt.Sprintf("%.1f%%", aggregate.ResultAccuracy))
-	logger.Highlight("Average goal difference error:", fmt.Sprintf("%.2f", aggregate.AverageGoalDiffError))
-	logger.Highlight("Average total goals error:", fmt.Sprintf("%.2f", aggregate.AverageTotalGoalsError))
 
 	return aggregate
 }
@@ -466,14 +427,11 @@ func getTeamStats(teamID string, leagueID int, season string) (*TeamStats, error
 	// Convert leagueID to string for TeamStats
 	leagueIDStr := strconv.Itoa(leagueID)
 
-	logger.Debug("Looking for team stats:", "teamID:", teamID, "leagueID:", leagueIDStr, "season:", season)
-
 	// Find the most recent team stats for this team/league/season
 	// Use FindWhere to get all stats for this team and find the latest round
 	// Note: Use database column names (with underscores) not struct field names
 	whereClause := "team_id = ? AND league_id = ? AND season = ? ORDER BY round DESC LIMIT 1"
-	logger.Debug("Executing team stats query:", whereClause, "with params:", teamID, leagueIDStr, season)
-	
+
 	results, err := FindWhere(&TeamStats{}, whereClause, teamID, leagueIDStr, season)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find team stats for team %s in league %d season %s: %w", teamID, leagueID, season, err)
@@ -484,13 +442,8 @@ func getTeamStats(teamID string, leagueID int, season string) (*TeamStats, error
 		return nil, fmt.Errorf("no team stats found for team %s in league %d season %s", teamID, leagueID, season)
 	}
 
-	logger.Debug("Found", len(results), "team stats results for team", teamID)
-
 	// Get the first (most recent) result
 	if teamStats, ok := results[0].(*TeamStats); ok {
-		logger.Debug("Found team stats for", teamID, "round", teamStats.Round,
-			"attack:", teamStats.HomeAttackStrength, "/", teamStats.AwayAttackStrength,
-			"defense:", teamStats.HomeDefenseStrength, "/", teamStats.AwayDefenseStrength)
 		return teamStats, nil
 	}
 
@@ -500,33 +453,21 @@ func getTeamStats(teamID string, leagueID int, season string) (*TeamStats, error
 // debugTeamStatsAvailability checks what team statistics are available for debugging
 func debugTeamStatsAvailability(leagueID int, season string) {
 	leagueIDStr := strconv.Itoa(leagueID)
-	
+
 	// Get a sample of team stats for this league/season
 	whereClause := "league_id = ? AND season = ? ORDER BY team_id, round DESC LIMIT 10"
 	results, err := FindWhere(&TeamStats{}, whereClause, leagueIDStr, season)
-	
+
 	if err != nil {
 		logger.Debug("Error checking team stats availability:", err)
 		return
 	}
-	
+
 	if len(results) == 0 {
 		logger.Warn("NO TEAM STATISTICS FOUND for league", leagueID, "season", season)
 		return
 	}
-	
-	logger.Debug("Found", len(results), "team stats records for league", leagueID, "season", season)
-	
-	// Show a few examples
-	for i, result := range results {
-		if i >= 3 { // Only show first 3 for brevity
-			break
-		}
-		if teamStats, ok := result.(*TeamStats); ok {
-			logger.Debug("Sample team stats:", "TeamID:", teamStats.TeamID, "Round:", teamStats.Round,
-				"Attack:", teamStats.HomeAttackStrength, "/", teamStats.AwayAttackStrength)
-		}
-	}
+
 }
 
 // getLeagueAverages retrieves league-wide averages for the season
@@ -544,7 +485,6 @@ func getLeagueAverages(leagueID int, season string) (*RoundAverage, error) {
 		TotalTeams:           getLeagueTeamCount(leagueID),
 	}
 
-	logger.Info("Using default league averages for prediction", "league:", leagueID, "season:", season)
 	return leagueAvg, nil
 }
 
@@ -582,17 +522,8 @@ func calculateExpectedGoals(attackingTeam, defendingTeam *TeamStats, leagueAvg *
 		leagueAvgGoals = leagueAvg.MeanAwayGoalsPerGame
 	}
 
-	// Debug log the calculation components
-	logger.Debug("Expected goals calculation:",
-		"isHome:", isHome,
-		"attackStrength:", attackStrength,
-		"defenseStrength:", defenseStrength,
-		"leagueAvgGoals:", leagueAvgGoals)
-
 	// Basic Poisson model: Expected Goals = Attack Strength × Defense Weakness × League Average
 	expectedGoals := attackStrength * defenseStrength * leagueAvgGoals
-
-	logger.Debug("Raw expected goals:", expectedGoals)
 
 	// Ensure we don't predict negative goals
 	if expectedGoals < 0 {
@@ -604,7 +535,6 @@ func calculateExpectedGoals(attackingTeam, defendingTeam *TeamStats, leagueAvg *
 		expectedGoals = 10
 	}
 
-	logger.Debug("Final expected goals:", expectedGoals)
 	return expectedGoals
 }
 
@@ -627,13 +557,6 @@ func calculateExpectedGoalsWithPoke(attackingTeam, defendingTeam *TeamStats, lea
 
 	// Apply poke-based adjustments
 	adjustedExpectedGoals := applyPokeAdjustments(baseExpectedGoals, match.Poke, isHome)
-
-	logger.Debug("Poke adjustment:",
-		"Team:", getTeamName(attackingTeam, isHome, match),
-		"Base goals:", fmt.Sprintf("%.2f", baseExpectedGoals),
-		"Adjusted goals:", fmt.Sprintf("%.2f", adjustedExpectedGoals),
-		"Poke:", match.Poke, "miles")
-
 	return adjustedExpectedGoals
 }
 
@@ -653,7 +576,6 @@ func applyPokeAdjustments(baseExpectedGoals float64, poke int, isHome bool) floa
 	if poke < 10 {
 		derbyBoost := 1.08 // 8% increase in expected goals for both teams
 		adjustedGoals *= derbyBoost
-		logger.Debug("Derby match detected (", poke, "miles) - boosting goals by 8%")
 	}
 
 	// Long Distance Travel Adjustment (away team disadvantage only)
@@ -666,22 +588,18 @@ func applyPokeAdjustments(baseExpectedGoals float64, poke int, isHome bool) floa
 			// Very long distance (300+ miles) - significant disadvantage
 			// Cross-country travel, potential overnight stays, jet lag effects
 			travelPenalty = 0.88 // 12% reduction
-			logger.Debug("Very long travel (", poke, "miles) - away team penalty: 12%")
 		case poke >= 200:
 			// Long distance (200-299 miles) - moderate disadvantage
 			// Several hours travel, disrupted preparation
 			travelPenalty = 0.92 // 8% reduction
-			logger.Debug("Long travel (", poke, "miles) - away team penalty: 8%")
 		case poke >= 100:
 			// Medium distance (100-199 miles) - small disadvantage
 			// 2-3 hours travel, minor disruption
 			travelPenalty = 0.96 // 4% reduction
-			logger.Debug("Medium travel (", poke, "miles) - away team penalty: 4%")
 		case poke >= 50:
 			// Short-medium distance (50-99 miles) - minimal impact
 			// 1-2 hours travel, very minor effect
 			travelPenalty = 0.98 // 2% reduction
-			logger.Debug("Short-medium travel (", poke, "miles) - away team penalty: 2%")
 		default:
 			// Short distance (10-49 miles) - no significant impact
 			travelPenalty = 1.0 // No penalty

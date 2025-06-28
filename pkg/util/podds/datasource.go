@@ -77,13 +77,11 @@ func (datasource *Datasource) Update() error {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	logger.Info("Starting bulk data load for leagues", Leagues, "seasons", Seasons)
-
 	// to start Load data for each league/season combination from fotmob
 	for _, leagueID := range Leagues {
 		for _, season := range Seasons {
 			logger.Info("Loading data for league", leagueID, "season", season)
-			
+
 			// Pre-load existing matches from database for this league/season
 			existingMatches, err := loadExistingMatches(leagueID, season)
 			if err != nil {
@@ -92,7 +90,7 @@ func (datasource *Datasource) Update() error {
 			} else {
 				logger.Info("Pre-loaded", len(existingMatches), "existing matches for", leagueID, season)
 			}
-			
+
 			safeSeason := strings.ReplaceAll(season, "/", "-")
 			cacheFilename := fmt.Sprintf(poddsCachePath+"fotmob-%d-%s-league.json", leagueID, safeSeason)
 			var pageProps map[string]any
@@ -344,7 +342,7 @@ func loadExistingMatches(leagueID int, season string) (map[string]*Match, error)
 	}
 
 	matches := make(map[string]*Match)
-	
+
 	for _, result := range results {
 		if match, ok := result.(*Match); ok {
 			matches[match.ID] = match
@@ -352,7 +350,7 @@ func loadExistingMatches(leagueID int, season string) (map[string]*Match, error)
 			logger.Warn("Unexpected type in FindWhere results, expected *Match")
 		}
 	}
-	
+
 	return matches, nil
 }
 
@@ -422,9 +420,9 @@ func (f *Datasource) extractMatchesWithCache(pageProps map[string]any, existingM
 			newMatches++
 		}
 	}
-	
-	logger.Info("Match processing summary:", 
-		"New:", newMatches, 
+
+	logger.Info("Match processing summary:",
+		"New:", newMatches,
 		"Existing with predictions:", existingWithPredictions,
 		"Existing without predictions:", existingWithoutPredictions,
 		"Total:", len(matches))

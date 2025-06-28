@@ -171,9 +171,6 @@ func processRoundStats(matches []*Match, leagueID int, season string, round int)
 			return err
 		}
 	}
-
-	logger.Info("Successfully calculated round average for league", leagueID, "season", season, "round", round, "teams:", len(roundStats))
-
 	return nil
 }
 
@@ -186,6 +183,17 @@ func recalculateTeamStatsForRound(roundAverage *RoundAverage, roundStats []*Team
 	const STATS_WEIGHT = 1.0 - FORM_WEIGHT
 
 	for _, teamStat := range roundStats {
+		// Calculate goals per game BEFORE calculating attack/defense strengths
+		if teamStat.HomeGamesPlayed > 0 {
+			teamStat.HomeGoalsPerGame = float64(teamStat.HomeGoals) / float64(teamStat.HomeGamesPlayed)
+			teamStat.HomeGoalsConcededPerGame = float64(teamStat.HomeConceded) / float64(teamStat.HomeGamesPlayed)
+		}
+
+		if teamStat.AwayGamesPlayed > 0 {
+			teamStat.AwayGoalsPerGame = float64(teamStat.AwayGoals) / float64(teamStat.AwayGamesPlayed)
+			teamStat.AwayGoalsConcededPerGame = float64(teamStat.AwayConceded) / float64(teamStat.AwayGamesPlayed)
+		}
+
 		// Calculate form percentages (fp, hfp, afp) - normalized against round maximums
 		teamStat.FP = float64(teamStat.Form) / makeSensible(roundAverage.MaxForm)
 		teamStat.HFP = float64(teamStat.HomeForm) / makeSensible(roundAverage.MaxHomeForm)
@@ -330,19 +338,19 @@ func calculateLeaguePositions(teamStats []*TeamStats) {
 
 	// Sort teams by league table criteria
 	// Note: Go's sort is stable, so we sort by least important criteria first
-	
+
 	// Sort by goals scored (ascending, will be reversed by points sort)
 	sort.Slice(teamStats, func(i, j int) bool {
 		return (teamStats[i].HomeGoals + teamStats[i].AwayGoals) > (teamStats[j].HomeGoals + teamStats[j].AwayGoals)
 	})
-	
+
 	// Sort by goal difference (ascending, will be reversed by points sort)
 	sort.Slice(teamStats, func(i, j int) bool {
 		goalDiffI := (teamStats[i].HomeGoals + teamStats[i].AwayGoals) - (teamStats[i].HomeConceded + teamStats[i].AwayConceded)
 		goalDiffJ := (teamStats[j].HomeGoals + teamStats[j].AwayGoals) - (teamStats[j].HomeConceded + teamStats[j].AwayConceded)
 		return goalDiffI > goalDiffJ
 	})
-	
+
 	// Sort by points (descending) - this is the primary sort
 	sort.Slice(teamStats, func(i, j int) bool {
 		return teamStats[i].Points > teamStats[j].Points
@@ -351,10 +359,8 @@ func calculateLeaguePositions(teamStats []*TeamStats) {
 	// Assign positions (1st place = position 1)
 	for i, team := range teamStats {
 		team.Position = i + 1
-		logger.Debug("Assigned position", team.Position, "to team", team.TeamID, "with", team.Points, "points")
 	}
 
-	logger.Info("League positions calculated for", len(teamStats), "teams")
 }
 
 /////////////////////////////////////////////////////////////////////////
