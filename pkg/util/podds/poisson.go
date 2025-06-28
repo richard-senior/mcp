@@ -84,12 +84,12 @@ func PredictMatch(match *Match) error {
 // shouldPredict determines if we should make a prediction for this match
 // Now simplified since match caching is handled at extraction level
 func shouldPredict(match *Match) bool {
-	// Check if match already has predictions (from cache or new calculation)
-	if match.PoissonPredictedHomeGoals != -1 || match.PoissonPredictedAwayGoals != -1 {
-		return false // Already has predictions
-	}
 
-	// For current season (2025/2026), apply time-based restrictions
+	// For current season, apply time-based restrictions
+	if match.Season == "" {
+		return false
+	}
+	GetSecondYear(match.Season)
 	if match.Season == "2025/2026" {
 		// Only predict for future matches that are more than 15 minutes away
 		now := time.Now()
@@ -116,6 +116,11 @@ func shouldPredict(match *Match) bool {
 			}
 			return true // Assume it's a future match
 		}
+	}
+
+	// Check if match already has predictions (from cache or new calculation)
+	if match.PoissonPredictedHomeGoals != -1 || match.PoissonPredictedAwayGoals != -1 {
+		return false // Already has predictions
 	}
 
 	// For historical seasons, predict if no existing prediction
