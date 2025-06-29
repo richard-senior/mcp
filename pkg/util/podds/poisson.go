@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"strconv"
+	"testing"
 	"time"
 
 	"github.com/richard-senior/mcp/internal/logger"
@@ -28,44 +29,74 @@ type PoissonResult struct {
 	Over2p5GoalsProbability float64
 }
 
-const (
-	POISSON_SIMULATIONS = 100000 // Number of Monte Carlo simulations
-	POISSON_RANGE       = 9      // Maximum goals to consider (0-8)
-)
-
 // PredictMatch calculates Poisson-based predictions for a match
-// Only predicts for future matches in the current season (2025/2026)
-func PredictMatch(match *Match) error {
-	// Only predict for future matches in current season
+// Uses centralized configuration from Config for all parameters
+func PredictMatch(match *Match, teamStats []*TeamStats) error {
+
+	// Only predict in certain circumstances
+	// Prevents reprediction after the fact (after the result is known) which skews
+	// accuracy statistics
+	// unless we're being invoked by a unit test
+	if !testing.Testing() && !shouldPredict(match) {
+		return nil
+	}
+
+	var err error
+	var homeStats *TeamStats
+	var awayStats *TeamStats
+	var hf = false
+	var af = false
+	// iterate teamStats and find the team stats out of the array for the match home and away teams
+	// if they're not present then try and look them up in the db
+
+	for _, teamStat := range teamStats {
+		if hf && af {
+			break
+		}
+		if teamStat.TeamID == match.HomeID {
+			homeStats = teamStat
+			hf = true
+		} else if teamStat.TeamID == match.AwayID {
+			awayStats = teamStat
+			af = true
+		}
+	}
+	if homeStats == nil || awayStats == nil {
+		homeStats, err = getTeamStatsFromDb(match.HomeID, match.LeagueID, match.Season)
+		if err != nil {
+			logger.Warn("Could not get home team stats for prediction", match.HomeTeamName, err)
+			return err
+		}
+
+		awayStats, err = getTeamStatsFromDb(match.AwayID, match.LeagueID, match.Season)
+		if err != nil {
+			logger.Warn("Could not get away team stats for prediction", match.AwayTeamName, err)
+			return err
+		}
+	}
+
+	return DoPredictMatch(match, homeStats, awayStats)
+
+}
+
+// DoPredictMatch calculates Poisson-based predictions for a match
+// Uses centralized configuration from Config for all parameters
+// amends the passed Match Instance with prediction data
+func DoPredictMatch(match *Match, homeStats *TeamStats, awayStats *TeamStats) error {
+
+	// Only predict in certain circumstances
+	// Prevents reprediction after the fact (after the result is known) which skews
+	// accuracy statistics
+	// unless we're being invoked by a unit test
 	if !shouldPredict(match) {
 		return nil
 	}
 
-	// Debug log match details
-	// First, let's check what team stats exist for this season/league
-	debugTeamStatsAvailability(match.LeagueID, match.Season)
-
-	homeStats, err := getTeamStats(match.HomeID, match.LeagueID, match.Season)
-	if err != nil {
-		logger.Warn("Could not get home team stats for prediction", match.HomeTeamName, err)
-		return err
-	}
-
-	awayStats, err := getTeamStats(match.AwayID, match.LeagueID, match.Season)
-	if err != nil {
-		logger.Warn("Could not get away team stats for prediction", match.AwayTeamName, err)
-		return err
-	}
-
-	// Get league averages for the season
-	leagueAvg, err := getLeagueAverages(match.LeagueID, match.Season)
-	if err != nil {
-		logger.Warn("Could not get league averages for prediction", err)
-		return err
-	}
-
 	// Calculate Poisson predictions using Monte Carlo simulation with poke adjustments
-	result := calculatePoissonPrediction(homeStats, awayStats, leagueAvg, match)
+	result, err := calculatePoissonPrediction(homeStats, awayStats, match)
+	if err != nil {
+		return err
+	}
 
 	// Update match with prediction results
 	match.PoissonPredictedHomeGoals = result.PredictedHomeGoals
@@ -84,22 +115,27 @@ func PredictMatch(match *Match) error {
 // shouldPredict determines if we should make a prediction for this match
 // Now simplified since match caching is handled at extraction level
 func shouldPredict(match *Match) bool {
-
 	// For current season, apply time-based restrictions
 	if match.Season == "" {
 		return false
 	}
+
+	if testing.Testing() {
+		return true
+	}
+
 	GetSecondYear(match.Season)
-	if match.Season == "2025/2026" {
-		// Only predict for future matches that are more than 15 minutes away
+	if match.Season == GetCurrentSeason() {
+		// Only predict for future matches that are more than the configured time buffer away
 		now := time.Now()
 		if match.UTCTime.Before(now) {
 			return false
 		}
 
-		// Don't predict matches that start within 15 minutes
-		fifteenMinutesFromNow := now.Add(15 * time.Minute)
-		if match.UTCTime.Before(fifteenMinutesFromNow) {
+		// Don't predict matches that start within the configured time buffer
+		timeBuffer := time.Duration(GetPredictionTimeBuffer()) * time.Minute
+		bufferTime := now.Add(timeBuffer)
+		if match.UTCTime.Before(bufferTime) {
 			return false
 		}
 
@@ -260,18 +296,21 @@ type AggregateAccuracy struct {
 // calculatePoissonPrediction performs Monte Carlo simulation using Poisson distribution
 // This mirrors the Python numpy approach: np.random.poisson(expectancy, 100000)
 // Enhanced with Dixon-Coles correction for low-scoring games and poke (travel distance) adjustments
-func calculatePoissonPrediction(homeStats, awayStats *TeamStats, leagueAvg *RoundAverage, match *Match) *PoissonResult {
+func calculatePoissonPrediction(homeStats, awayStats *TeamStats, match *Match) (*PoissonResult, error) {
+	if homeStats == nil || awayStats == nil || match == nil {
+		return nil, fmt.Errorf("Must pass non-null values to this function")
+	}
 	// Calculate expected goals with poke adjustments
-	homeExpectedGoals := calculateExpectedGoalsWithPoke(homeStats, awayStats, leagueAvg, match, true)
-	awayExpectedGoals := calculateExpectedGoalsWithPoke(awayStats, homeStats, leagueAvg, match, false)
+	homeExpectedGoals := calculateExpectedGoalsWithPoke(homeStats, awayStats, match, true)
+	awayExpectedGoals := calculateExpectedGoalsWithPoke(awayStats, homeStats, match, false)
 
 	// Generate Poisson samples (equivalent to np.random.poisson)
-	homeGoalSamples := generatePoissonSamples(homeExpectedGoals, POISSON_SIMULATIONS)
-	awayGoalSamples := generatePoissonSamples(awayExpectedGoals, POISSON_SIMULATIONS)
+	homeGoalSamples := generatePoissonSamples(homeExpectedGoals, Config.PoissonSimulations)
+	awayGoalSamples := generatePoissonSamples(awayExpectedGoals, Config.PoissonSimulations)
 
 	// Calculate probability distributions for each goal count
-	homeProbabilities := calculateGoalProbabilities(homeGoalSamples, POISSON_RANGE)
-	awayProbabilities := calculateGoalProbabilities(awayGoalSamples, POISSON_RANGE)
+	homeProbabilities := calculateGoalProbabilities(homeGoalSamples, Config.PoissonRange)
+	awayProbabilities := calculateGoalProbabilities(awayGoalSamples, Config.PoissonRange)
 
 	// Create probability matrix (equivalent to np.outer)
 	probabilityMatrix := createProbabilityMatrix(homeProbabilities, awayProbabilities)
@@ -287,8 +326,8 @@ func calculatePoissonPrediction(homeStats, awayStats *TeamStats, leagueAvg *Roun
 	predictedAwayGoals := findMostLikelyGoalsFromMatrix(correctedMatrix, false)
 
 	// Calculate over/under probabilities (using original samples for consistency)
-	over1p5Prob := calculateOverGoalsProbability(homeGoalSamples, awayGoalSamples, 1.5)
-	over2p5Prob := calculateOverGoalsProbability(homeGoalSamples, awayGoalSamples, 2.5)
+	over1p5Prob := calculateOverGoalsProbability(homeGoalSamples, awayGoalSamples, Config.Over1p5GoalsThreshold)
+	over2p5Prob := calculateOverGoalsProbability(homeGoalSamples, awayGoalSamples, Config.Over2p5GoalsThreshold)
 
 	return &PoissonResult{
 		HomeExpectedGoals:       homeExpectedGoals,
@@ -300,7 +339,7 @@ func calculatePoissonPrediction(homeStats, awayStats *TeamStats, leagueAvg *Roun
 		AwayWinProbability:      awayWinProb * 100.0,
 		Over1p5GoalsProbability: over1p5Prob * 100.0,
 		Over2p5GoalsProbability: over2p5Prob * 100.0,
-	}
+	}, nil
 }
 
 // generatePoissonSamples generates random samples from Poisson distribution
@@ -426,9 +465,9 @@ func calculateOverGoalsProbability(homeGoals, awayGoals []int, threshold float64
 	return float64(count) / float64(total)
 }
 
-// getTeamStats retrieves team statistics for Poisson calculation
+// getTeamStatsFromDb retrieves team statistics for Poisson calculation
 // Gets the most recent team statistics available for the team
-func getTeamStats(teamID string, leagueID int, season string) (*TeamStats, error) {
+func getTeamStatsFromDb(teamID string, leagueID int, season string) (*TeamStats, error) {
 	// Convert leagueID to string for TeamStats
 	leagueIDStr := strconv.Itoa(leagueID)
 
@@ -475,60 +514,41 @@ func debugTeamStatsAvailability(leagueID int, season string) {
 
 }
 
-// getLeagueAverages retrieves league-wide averages for the season
-func getLeagueAverages(leagueID int, season string) (*RoundAverage, error) {
-	// Since RoundAverage doesn't implement Persistable, we'll use default values
-	// In a production system, this would calculate actual league averages
-	// For now, we'll use reasonable defaults based on typical football statistics
-
-	leagueAvg := &RoundAverage{
-		LeagueID:             strconv.Itoa(leagueID),
-		Season:               season,
-		Round:                1,
-		MeanHomeGoalsPerGame: 1.5, // Typical home team average
-		MeanAwayGoalsPerGame: 1.1, // Typical away team average
-		TotalTeams:           getLeagueTeamCount(leagueID),
-	}
-
-	return leagueAvg, nil
-}
-
-// getLeagueTeamCount returns the number of teams in a league
+// getLeagueTeamCount returns the number of teams in a league using configuration
 func getLeagueTeamCount(leagueID int) int {
 	switch leagueID {
 	case 47: // Premier League
-		return 20
+		return Config.PremierLeagueTeams
 	case 48: // Championship
-		return 24
+		return Config.ChampionshipTeams
 	case 108: // League One
-		return 24
+		return Config.LeagueOneTeams
 	case 109: // League Two
-		return 24
+		return Config.LeagueTwoTeams
 	default:
-		return 20 // Default assumption
+		return Config.DefaultLeagueTeams // Configurable default assumption
 	}
 }
 
 // calculateExpectedGoals calculates expected goals using Poisson model
-// Formula: Expected Goals = (Team Attack Strength × Opposition Defense Weakness × League Average)
-func calculateExpectedGoals(attackingTeam, defendingTeam *TeamStats, leagueAvg *RoundAverage, isHome bool) float64 {
+// Formula: Expected Goals = (Team Attack Strength × Opposition Defense Weakness)
+// Note: League averages are already incorporated into the attack/defense strengths during team stats calculation
+func calculateExpectedGoals(attackingTeam, defendingTeam *TeamStats, isHome bool) float64 {
 	var attackStrength, defenseStrength float64
-	var leagueAvgGoals float64
 
 	if isHome {
 		// Home team attacking
 		attackStrength = attackingTeam.HomeAttackStrength
 		defenseStrength = defendingTeam.AwayDefenseStrength
-		leagueAvgGoals = leagueAvg.MeanHomeGoalsPerGame
 	} else {
 		// Away team attacking
 		attackStrength = attackingTeam.AwayAttackStrength
 		defenseStrength = defendingTeam.HomeDefenseStrength
-		leagueAvgGoals = leagueAvg.MeanAwayGoalsPerGame
 	}
 
-	// Basic Poisson model: Expected Goals = Attack Strength × Defense Weakness × League Average
-	expectedGoals := attackStrength * defenseStrength * leagueAvgGoals
+	// Poisson model: Expected Goals = Attack Strength × Defense Weakness
+	// The league averages are already baked into the attack/defense strengths
+	expectedGoals := attackStrength * defenseStrength
 
 	// Ensure we don't predict negative goals
 	if expectedGoals < 0 {
@@ -556,9 +576,9 @@ func calculateExpectedGoals(attackingTeam, defendingTeam *TeamStats, leagueAvg *
 // 3. Home teams are unaffected by travel distance (always playing at home)
 //
 // Formula: Expected Goals = (Base Poisson Calculation) × Derby Boost × Travel Penalty
-func calculateExpectedGoalsWithPoke(attackingTeam, defendingTeam *TeamStats, leagueAvg *RoundAverage, match *Match, isHome bool) float64 {
+func calculateExpectedGoalsWithPoke(attackingTeam, defendingTeam *TeamStats, match *Match, isHome bool) float64 {
 	// Calculate base expected goals using standard Poisson model
-	baseExpectedGoals := calculateExpectedGoals(attackingTeam, defendingTeam, leagueAvg, isHome)
+	baseExpectedGoals := calculateExpectedGoals(attackingTeam, defendingTeam, isHome)
 
 	// Apply poke-based adjustments
 	adjustedExpectedGoals := applyPokeAdjustments(baseExpectedGoals, match.Poke, isHome)
@@ -575,12 +595,11 @@ func applyPokeAdjustments(baseExpectedGoals float64, poke int, isHome bool) floa
 
 	adjustedGoals := baseExpectedGoals
 
-	// Derby Match Adjustment (< 10 miles)
+	// Derby Match Adjustment (configurable distance threshold)
 	// Local derbies tend to be more attacking/open games with higher intensity
 	// Both teams benefit from increased motivation and crowd atmosphere
-	if poke < 10 {
-		derbyBoost := 1.08 // 8% increase in expected goals for both teams
-		adjustedGoals *= derbyBoost
+	if poke < Config.DerbyDistanceThreshold {
+		adjustedGoals *= Config.DerbyBoostMultiplier
 	}
 
 	// Long Distance Travel Adjustment (away team disadvantage only)
@@ -589,24 +608,24 @@ func applyPokeAdjustments(baseExpectedGoals float64, poke int, isHome bool) floa
 		var travelPenalty float64
 
 		switch {
-		case poke >= 300:
-			// Very long distance (300+ miles) - significant disadvantage
+		case poke >= Config.VeryLongTravelThreshold:
+			// Very long distance - significant disadvantage
 			// Cross-country travel, potential overnight stays, jet lag effects
-			travelPenalty = 0.88 // 12% reduction
-		case poke >= 200:
-			// Long distance (200-299 miles) - moderate disadvantage
+			travelPenalty = Config.VeryLongTravelPenalty
+		case poke >= Config.LongTravelThreshold:
+			// Long distance - moderate disadvantage
 			// Several hours travel, disrupted preparation
-			travelPenalty = 0.92 // 8% reduction
-		case poke >= 100:
-			// Medium distance (100-199 miles) - small disadvantage
+			travelPenalty = Config.LongTravelPenalty
+		case poke >= Config.MediumTravelThreshold:
+			// Medium distance - small disadvantage
 			// 2-3 hours travel, minor disruption
-			travelPenalty = 0.96 // 4% reduction
-		case poke >= 50:
-			// Short-medium distance (50-99 miles) - minimal impact
+			travelPenalty = Config.MediumTravelPenalty
+		case poke >= Config.ShortTravelThreshold:
+			// Short-medium distance - minimal impact
 			// 1-2 hours travel, very minor effect
-			travelPenalty = 0.98 // 2% reduction
+			travelPenalty = Config.ShortTravelPenalty
 		default:
-			// Short distance (10-49 miles) - no significant impact
+			// Short distance - no significant impact
 			travelPenalty = 1.0 // No penalty
 		}
 
@@ -614,13 +633,13 @@ func applyPokeAdjustments(baseExpectedGoals float64, poke int, isHome bool) floa
 	}
 
 	// Ensure we don't predict negative goals
-	if adjustedGoals < 0 {
-		adjustedGoals = 0
+	if adjustedGoals < Config.MinGoalsFloor {
+		adjustedGoals = Config.MinGoalsFloor
 	}
 
 	// Cap at reasonable maximum
-	if adjustedGoals > 10 {
-		adjustedGoals = 10
+	if adjustedGoals > Config.MaxGoalsCap {
+		adjustedGoals = Config.MaxGoalsCap
 	}
 
 	return adjustedGoals
@@ -635,10 +654,10 @@ func getTeamName(teamStats *TeamStats, isHome bool, match *Match) string {
 }
 
 // Dixon-Coles correction functions
-// dixonColesCorrection applies Dixon-Coles adjustment to probability matrix
+// dixonColesCorrection applies Dixon-Coles adjustment to probability matrix using configuration
 func dixonColesCorrection(matrix [][]float64, homeExpected, awayExpected float64) [][]float64 {
-	// Dixon-Coles correlation parameter (empirically derived)
-	const RHO = -0.03 // Typical range: -0.03 to -0.05
+	// Dixon-Coles correlation parameter (configurable)
+	rho := GetDixonColesRho()
 
 	correctedMatrix := make([][]float64, len(matrix))
 	for i := range matrix {
@@ -649,19 +668,19 @@ func dixonColesCorrection(matrix [][]float64, homeExpected, awayExpected float64
 	// Apply corrections to specific low-scoring combinations
 	if len(matrix) > 2 && len(matrix[0]) > 2 {
 		// 0-0 correction
-		tau00 := calculateTau(0, 0, homeExpected, awayExpected, RHO)
+		tau00 := calculateTau(0, 0, homeExpected, awayExpected, rho)
 		correctedMatrix[0][0] *= tau00
 
 		// 1-0 correction
-		tau10 := calculateTau(1, 0, homeExpected, awayExpected, RHO)
+		tau10 := calculateTau(1, 0, homeExpected, awayExpected, rho)
 		correctedMatrix[1][0] *= tau10
 
 		// 0-1 correction
-		tau01 := calculateTau(0, 1, homeExpected, awayExpected, RHO)
+		tau01 := calculateTau(0, 1, homeExpected, awayExpected, rho)
 		correctedMatrix[0][1] *= tau01
 
 		// 1-1 correction
-		tau11 := calculateTau(1, 1, homeExpected, awayExpected, RHO)
+		tau11 := calculateTau(1, 1, homeExpected, awayExpected, rho)
 		correctedMatrix[1][1] *= tau11
 	}
 

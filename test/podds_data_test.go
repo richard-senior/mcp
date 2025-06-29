@@ -30,10 +30,10 @@ func TestLookupTeamName(t *testing.T) {
 // TestInitialPositionsValidation validates INITIAL_POSITIONS against FINAL_POSITIONS from previous seasons
 func TestInitialPositionsValidation(t *testing.T) {
 	data := podds.GetDataInstance()
-	for _, leagueID := range podds.Leagues {
-		for _, season := range podds.Seasons {
+	for _, leagueID := range podds.Config.Leagues {
+		for _, season := range podds.Config.Seasons {
 			sy, err := podds.GetSecondYear(season)
-			if podds.CurrentSeasonSecondYear == sy {
+			if podds.Config.CurrentSeasonSecondYear == sy {
 				// we have no finishing data for this season as it hasn't finished
 				// for this year we must use AI to validate in some way against the table data
 				continue

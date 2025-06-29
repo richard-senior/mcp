@@ -23,23 +23,6 @@ type Persistable interface {
 	AfterDelete() error
 }
 
-// InitDatabase initializes the SQLite database connection
-func InitDatabase(dbPath string) error {
-	var err error
-	db, err = sql.Open("sqlite", dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-
-	// Test the connection
-	if err = db.Ping(); err != nil {
-		return fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	logger.Info("Database initialized successfully", dbPath)
-	return nil
-}
-
 // CloseDatabase closes the database connection
 func CloseDatabase() error {
 	if db != nil {
@@ -49,8 +32,22 @@ func CloseDatabase() error {
 }
 
 // GetDB returns the database connection for testing purposes
-func GetDB() *sql.DB {
-	return db
+func GetDB() (*sql.DB, error) {
+	if db == nil {
+		var err error
+		db, err = sql.Open("sqlite", Config.PoddsDbPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open database: %w", err)
+		}
+
+		// Test the connection
+		if err = db.Ping(); err != nil {
+			return nil, fmt.Errorf("failed to ping database: %w", err)
+		}
+
+		logger.Info("Database initialized successfully", Config.PoddsDbPath)
+	}
+	return db, nil
 }
 
 // createTables creates all necessary database tables
@@ -78,8 +75,9 @@ func createTables() error {
 
 // CreateTable creates a table for the given persistable object using struct tags
 func CreateTable(obj Persistable) error {
-	if db == nil {
-		return fmt.Errorf("database not initialized - call InitDatabase first")
+	d, err := (GetDB())
+	if err != nil {
+		return err
 	}
 
 	tableName := obj.GetTableName()
@@ -87,7 +85,7 @@ func CreateTable(obj Persistable) error {
 
 	logger.Debug("Creating table with SQL", createSQL)
 
-	_, err := db.Exec(createSQL)
+	_, err = d.Exec(createSQL)
 	if err != nil {
 		return fmt.Errorf("failed to create table %s: %w", tableName, err)
 	}
@@ -96,7 +94,7 @@ func CreateTable(obj Persistable) error {
 	indexSQL := generateIndexSQL(obj, tableName)
 	for _, query := range indexSQL {
 		logger.Debug("Creating index with SQL", query)
-		if _, err := db.Exec(query); err != nil {
+		if _, err := d.Exec(query); err != nil {
 			logger.Warn("Failed to create index", err)
 		}
 	}
@@ -223,10 +221,6 @@ func generateIndexSQL(obj interface{}, tableName string) []string {
 
 // Save persists the object to the database (INSERT or UPDATE)
 func Save(obj Persistable) error {
-	if db == nil {
-		return fmt.Errorf("database not initialized - call InitDatabase first")
-	}
-
 	// Call before save hook
 	if err := obj.BeforeSave(); err != nil {
 		return fmt.Errorf("before save hook failed: %w", err)
@@ -258,6 +252,11 @@ func Save(obj Persistable) error {
 
 // insert adds a new record to the database
 func insert(obj Persistable) error {
+	d, err := (GetDB())
+	if err != nil {
+		return err
+	}
+
 	tableName := obj.GetTableName()
 	columns, placeholders, values := getInsertData(obj)
 
@@ -266,7 +265,7 @@ func insert(obj Persistable) error {
 
 	logger.Debug("Insert SQL", query)
 
-	_, err := db.Exec(query, values...)
+	_, err = d.Exec(query, values...)
 	if err != nil {
 		return fmt.Errorf("failed to insert into %s: %w", tableName, err)
 	}
@@ -276,6 +275,11 @@ func insert(obj Persistable) error {
 
 // update modifies an existing record in the database
 func update(obj Persistable) error {
+	d, err := (GetDB())
+	if err != nil {
+		return err
+	}
+
 	tableName := obj.GetTableName()
 	setPairs, values := getUpdateData(obj)
 
@@ -286,7 +290,7 @@ func update(obj Persistable) error {
 
 	logger.Debug("Update SQL", query)
 
-	_, err := db.Exec(query, values...)
+	_, err = d.Exec(query, values...)
 	if err != nil {
 		return fmt.Errorf("failed to update %s: %w", tableName, err)
 	}
@@ -393,8 +397,9 @@ func getUpdateData(obj interface{}) ([]string, []interface{}) {
 
 // Exists checks if the object exists in the database
 func Exists(obj Persistable) (bool, error) {
-	if db == nil {
-		return false, fmt.Errorf("database not initialized - call InitDatabase first")
+	d, err := (GetDB())
+	if err != nil {
+		return false, err
 	}
 
 	tableName := obj.GetTableName()
@@ -403,7 +408,7 @@ func Exists(obj Persistable) (bool, error) {
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, whereClause)
 
 	var count int
-	err := db.QueryRow(query, values...).Scan(&count)
+	err = d.QueryRow(query, values...).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("failed to check existence in %s: %w", tableName, err)
 	}
@@ -413,8 +418,9 @@ func Exists(obj Persistable) (bool, error) {
 
 // Delete removes the object from the database
 func Delete(obj Persistable) error {
-	if db == nil {
-		return fmt.Errorf("database not initialized - call InitDatabase first")
+	d, err := (GetDB())
+	if err != nil {
+		return err
 	}
 
 	// Call before delete hook
@@ -427,7 +433,7 @@ func Delete(obj Persistable) error {
 
 	query := fmt.Sprintf("DELETE FROM %s WHERE %s", tableName, whereClause)
 
-	_, err := db.Exec(query, values...)
+	_, err = d.Exec(query, values...)
 	if err != nil {
 		return fmt.Errorf("failed to delete from %s: %w", tableName, err)
 	}
@@ -442,8 +448,9 @@ func Delete(obj Persistable) error {
 
 // FindByID retrieves an object by its ID
 func FindByPrimaryKey(obj Persistable, primaryKey map[string]interface{}) error {
-	if db == nil {
-		return fmt.Errorf("database not initialized - call InitDatabase first")
+	d, err := (GetDB())
+	if err != nil {
+		return err
 	}
 
 	tableName := obj.GetTableName()
@@ -454,8 +461,8 @@ func FindByPrimaryKey(obj Persistable, primaryKey map[string]interface{}) error 
 
 	logger.Debug("FindByPrimaryKey SQL", query)
 
-	row := db.QueryRow(query, values...)
-	err := row.Scan(destinations...)
+	row := d.QueryRow(query, values...)
+	err = row.Scan(destinations...)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("record not found in %s", tableName)
@@ -468,8 +475,9 @@ func FindByPrimaryKey(obj Persistable, primaryKey map[string]interface{}) error 
 
 // FindAll retrieves all records of the given type
 func FindAll(obj Persistable) ([]interface{}, error) {
-	if db == nil {
-		return nil, fmt.Errorf("database not initialized - call InitDatabase first")
+	d, err := (GetDB())
+	if err != nil {
+		return nil, err
 	}
 
 	tableName := obj.GetTableName()
@@ -479,7 +487,7 @@ func FindAll(obj Persistable) ([]interface{}, error) {
 
 	logger.Debug("FindAll SQL", query)
 
-	rows, err := db.Query(query)
+	rows, err := d.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query %s: %w", tableName, err)
 	}
@@ -553,11 +561,12 @@ func getSelectData(obj interface{}) ([]string, []interface{}) {
 
 // BulkSave saves multiple objects in a transaction
 func BulkSave(objects []Persistable) error {
-	if db == nil {
-		return fmt.Errorf("database not initialized - call InitDatabase first")
+	d, err := (GetDB())
+	if err != nil {
+		return err
 	}
 
-	tx, err := db.Begin()
+	tx, err := d.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -621,8 +630,9 @@ func getPrimaryKeyFields(obj interface{}) []string {
 
 // FindWhere executes a custom WHERE query
 func FindWhere(obj Persistable, whereClause string, args ...interface{}) ([]interface{}, error) {
-	if db == nil {
-		return nil, fmt.Errorf("database not initialized - call InitDatabase first")
+	d, err := (GetDB())
+	if err != nil {
+		return nil, err
 	}
 
 	tableName := obj.GetTableName()
@@ -632,7 +642,7 @@ func FindWhere(obj Persistable, whereClause string, args ...interface{}) ([]inte
 
 	logger.Debug("FindWhere SQL", query)
 
-	rows, err := db.Query(query, args...)
+	rows, err := d.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query %s: %w", tableName, err)
 	}

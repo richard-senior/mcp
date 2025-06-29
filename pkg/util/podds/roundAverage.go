@@ -2,9 +2,9 @@ package podds
 
 import (
 	"fmt"
-
-	"github.com/richard-senior/mcp/internal/logger"
 )
+
+var raCache = []*RoundAverage{}
 
 // RoundAverage represents the average statistics for all teams in a specific round
 // we don't bother to implement the persistable interface as this data is ephemeral being
@@ -12,7 +12,7 @@ import (
 type RoundAverage struct {
 	// Primary key fields
 	Round    int    `json:"round" column:"round" dbtype:"INTEGER NOT NULL" primary:"true"`
-	LeagueID string `json:"leagueId" column:"league_id" dbtype:"TEXT NOT NULL" primary:"true"`
+	LeagueID int 	`json:"leagueId" column:"league_id" dbtype:"INTEGER NOT NULL" primary:"true"`
 	Season   string `json:"season" column:"season" dbtype:"TEXT NOT NULL" primary:"true"`
 
 	// Basic stats
@@ -41,28 +41,34 @@ type RoundAverage struct {
 	MeanAwayDefense float64 `json:"meanAwayDefense" column:"mean_away_defense" dbtype:"REAL DEFAULT 1.0"`
 }
 
-// makeSensible ensures a value is not zero to avoid division by zero
+// makeSensible ensures a value is not zero to avoid division by zero using configuration
 func makeSensible(value float64) float64 {
 	if value == 0.0 {
-		return 1.0
+		return GetMakeSensibleDefault()
 	}
 	return value
 }
 
 // CalculateRoundAverages calculates round averages for all teams in a single round
-func CalculateRoundAverages(teams []*TeamStats, leagueID string, season string) (*RoundAverage, error) {
+func CalculateRoundAverages(teams []*TeamStats, leagueID int, season string) (*RoundAverage, error) {
 	if len(teams) == 0 {
 		return nil, fmt.Errorf("no teams provided for round average calculation")
+	}
+
+	// check raCache to see if we've already calculated these stats
+	// if so, return the cached value
+	for _, ra := range raCache {
+		if ra.LeagueID == leagueID && ra.Season == season && ra.Round == teams[0].Round {
+			return ra, nil
+		}
 	}
 
 	// All teams should be from the same round - use the first team's round
 	round := teams[0].Round
 
-	logger.Info("Calculating round averages for league", leagueID, "season", season, "round", round)
-	logger.Debug("Processing round", round, "with", len(teams), "teams")
-
-	const FORM_WEIGHT = 0.3 // This should match Config.FORM_WEIGHT from Python
-	const STATS_WEIGHT = 1.0 - FORM_WEIGHT
+	// Use centralized configuration for weights
+	formWeight := GetFormWeight()
+	statsWeight := GetStatsWeight()
 
 	// Initialize accumulators
 	var (
@@ -146,23 +152,23 @@ func CalculateRoundAverages(teams []*TeamStats, leagueID string, season string) 
 
 		// Calculate attack strengths
 		homeAttack := team.HomeGoalsPerGame / makeSensible(roundAvg.MeanHomeGoalsPerGame)
-		homeAttack = (STATS_WEIGHT * homeAttack) + (FORM_WEIGHT * ((team.FormPercentage + team.HomeFormPercentage) / 2) * homeAttack)
+		homeAttack = (statsWeight * homeAttack) + (formWeight * ((team.FormPercentage + team.HomeFormPercentage) / 2) * homeAttack)
 		team.HomeAttackStrength = homeAttack
 		totalHomeAttack += homeAttack
 
 		awayAttack := team.AwayGoalsPerGame / makeSensible(roundAvg.MeanAwayGoalsPerGame)
-		awayAttack = (STATS_WEIGHT * awayAttack) + (FORM_WEIGHT * ((team.FormPercentage + team.AwayFormPercentage) / 2) * awayAttack)
+		awayAttack = (statsWeight * awayAttack) + (formWeight * ((team.FormPercentage + team.AwayFormPercentage) / 2) * awayAttack)
 		team.AwayAttackStrength = awayAttack
 		totalAwayAttack += awayAttack
 
 		// Calculate defense strengths
 		homeDefense := team.HomeGoalsConcededPerGame / makeSensible(roundAvg.MeanHomeGoalsConcededPerGame)
-		homeDefense = (STATS_WEIGHT * homeDefense) + (FORM_WEIGHT * (2 - (team.FormPercentage+team.HomeFormPercentage)/2) * homeDefense)
+		homeDefense = (statsWeight * homeDefense) + (formWeight * (2 - (team.FormPercentage+team.HomeFormPercentage)/2) * homeDefense)
 		team.HomeDefenseStrength = homeDefense
 		totalHomeDefense += homeDefense
 
 		awayDefense := team.AwayGoalsConcededPerGame / makeSensible(roundAvg.MeanAwayGoalsConcededPerGame)
-		awayDefense = (STATS_WEIGHT * awayDefense) + (FORM_WEIGHT * (2 - (team.FormPercentage+team.AwayFormPercentage)/2) * awayDefense)
+		awayDefense = (statsWeight * awayDefense) + (formWeight * (2 - (team.FormPercentage+team.AwayFormPercentage)/2) * awayDefense)
 		team.AwayDefenseStrength = awayDefense
 		totalAwayDefense += awayDefense
 	}
@@ -173,67 +179,7 @@ func CalculateRoundAverages(teams []*TeamStats, leagueID string, season string) 
 	roundAvg.MeanAwayAttack = totalAwayAttack / float64(len(teams))
 	roundAvg.MeanAwayDefense = totalAwayDefense / float64(len(teams))
 
-	// Save the round average
-	// we don't need to persist this object it's ephemeral
-	/*
-		if err := Save(roundAvg); err != nil {
-			logger.Error("Failed to save round average for round", round, "error:", err)
-			return nil, fmt.Errorf("failed to save round average for round %d: %w", round, err)
-		}
-	*/
-
-	logger.Info("Successfully calculated round average for round", round, "with", len(teams), "teams")
+	// append to raCache
+	raCache = append(raCache, roundAvg)
 	return roundAvg, nil
-}
-
-// GetTableName returns the database table name for RoundAverage
-func (r *RoundAverage) GetTableName() string {
-	return "round_average"
-}
-
-// GetPrimaryKey returns the primary key values for RoundAverage
-func (r *RoundAverage) GetPrimaryKey() map[string]interface{} {
-	return map[string]interface{}{
-		"round":     r.Round,
-		"league_id": r.LeagueID,
-		"season":    r.Season,
-	}
-}
-
-// SetPrimaryKey sets the primary key values for RoundAverage
-func (r *RoundAverage) SetPrimaryKey(pk map[string]interface{}) error {
-	if round, ok := pk["round"].(int); ok {
-		r.Round = round
-	}
-	if leagueID, ok := pk["league_id"].(string); ok {
-		r.LeagueID = leagueID
-	}
-	if season, ok := pk["season"].(string); ok {
-		r.Season = season
-	}
-	return nil
-}
-
-// BeforeDelete is called before a RoundAverage record is deleted from the database
-func (r *RoundAverage) BeforeDelete() error {
-	// No special validation needed for RoundAverage
-	return nil
-}
-
-// AfterDelete is called after a RoundAverage record is deleted from the database
-func (r *RoundAverage) AfterDelete() error {
-	// No special cleanup needed for RoundAverage
-	return nil
-}
-
-// BeforeSave is called before a RoundAverage record is saved to the database
-func (r *RoundAverage) BeforeSave() error {
-	// No special validation needed for RoundAverage
-	return nil
-}
-
-// AfterSave is called after a RoundAverage record is saved to the database
-func (r *RoundAverage) AfterSave() error {
-	// No special processing needed for RoundAverage
-	return nil
 }

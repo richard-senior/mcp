@@ -80,8 +80,35 @@ type TeamStats struct {
 ////// Team Statistics Processing Functions
 /////////////////////////////////////////////////////////////////////////
 
-// ProcessAndSaveTeamStats processes matches and generates team statistics
-func ProcessAndSaveTeamStats(matches []*Match, leagueID int, season string) error {
+/*
+* ProcessAndSaveTeamStats processes matches and generates team statistics
+* This method is called when the code is running normally (not in a unit test etc.)
+* Makes use of the ProcessTeamStats method which actually does the work.
+ */
+func ProcessAndSaveTeamStats(matches []*Match, leagueID int, season string) ([]*TeamStats, error) {
+	s, err := ProcessTeamStats(matches, leagueID, season)
+	if err != nil {
+		return nil, err
+	}
+	// Now save the completed team stats for later use
+	for _, teamStat := range s {
+		if err := Save(teamStat); err != nil {
+			logger.Error("Failed to save updated team stats for team", teamStat.TeamID, "round", teamStat.Round, "error:", err)
+			return nil, fmt.Errorf("failed to save updated team stats: %w", err)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+/*
+* ProcessTeamStats processes matches and generates team statistics
+* Does not persist the data, only calculates and returns it. This is a good entry
+* for unit tests wishing to test this code without having to persist data.
+ */
+func ProcessTeamStats(matches []*Match, leagueID int, season string) ([]*TeamStats, error) {
 	logger.Info("Processing team statistics for league", leagueID, "season", season)
 
 	// Group matches by round
@@ -89,22 +116,25 @@ func ProcessAndSaveTeamStats(matches []*Match, leagueID int, season string) erro
 
 	// Process each round in order
 	rounds := GetSortedRounds(roundMatches)
+	ret := []*TeamStats{}
 
 	for _, round := range rounds {
-		logger.Debug("Processing round", round, "for league", leagueID, "season", season)
-
-		if err := processRoundStats(roundMatches[round], leagueID, season, round); err != nil {
+		var err error
+		var rs []*TeamStats
+		if rs, err = processRoundStats(roundMatches[round], leagueID, season, round); err != nil {
 			logger.Error("Failed to process round stats", round, err)
 			continue
 		}
+		// append these round stats to the ret array
+		ret = append(ret, rs...)
 	}
 
 	logger.Info("Team statistics processed successfully")
-	return nil
+	return ret, nil
 }
 
 // ProcessRoundStats processes statistics for a specific round
-func processRoundStats(matches []*Match, leagueID int, season string, round int) error {
+func processRoundStats(matches []*Match, leagueID int, season string, round int) ([]*TeamStats, error) {
 	// Get all teams in this round
 	teams := GetTeamsFromMatches(matches)
 	// keep a record of all stats generated for later postprocessing
@@ -151,9 +181,9 @@ func processRoundStats(matches []*Match, leagueID int, season string, round int)
 	}
 
 	// Calculate round averages for this round
-	roundAverage, err := CalculateRoundAverages(roundStats, fmt.Sprintf("%d", leagueID), season)
+	roundAverage, err := CalculateRoundAverages(roundStats, leagueID, season)
 	if err != nil {
-		return fmt.Errorf("failed to calculate round averages: %w", err)
+		return nil, fmt.Errorf("failed to calculate round averages: %w", err)
 	}
 	// Now use these average calculations to recalculate each TeamStats objects adding new fields
 	recalculateTeamStatsForRound(roundAverage, roundStats)
@@ -161,17 +191,8 @@ func processRoundStats(matches []*Match, leagueID int, season string, round int)
 	// Calculate league positions based on points, goal difference, and goals scored
 	calculateLeaguePositions(roundStats)
 
-	// Now save the completed team stats for later use
-	for _, teamStat := range roundStats {
-		if err := Save(teamStat); err != nil {
-			logger.Error("Failed to save updated team stats for team", teamStat.TeamID, "round", teamStat.Round, "error:", err)
-			return fmt.Errorf("failed to save updated team stats: %w", err)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	// data will be persisted to db elsewhere
+	return roundStats, nil
 }
 
 // Using round averages for all teams, calculate base statistics which will be used to
@@ -179,8 +200,9 @@ func processRoundStats(matches []*Match, leagueID int, season string, round int)
 func recalculateTeamStatsForRound(roundAverage *RoundAverage, roundStats []*TeamStats) error {
 	// Now recalculate team stats with this round average
 	// This implements the Python logic from Teams.calculateRoundAverages()
-	const FORM_WEIGHT = 0.3 // This should match Config.FORM_WEIGHT from Python
-	const STATS_WEIGHT = 1.0 - FORM_WEIGHT
+	// Use centralized configuration for weights
+	formWeight := GetFormWeight()
+	statsWeight := GetStatsWeight()
 
 	for _, teamStat := range roundStats {
 		// Calculate goals per game BEFORE calculating attack/defense strengths
@@ -207,22 +229,22 @@ func recalculateTeamStatsForRound(roundAverage *RoundAverage, roundStats []*Team
 		// Calculate attack/defense strengths using weighted combination of stats and form
 		// Home Attack Strength
 		homeAttack := teamStat.HomeGoalsPerGame / makeSensible(roundAverage.MeanHomeGoalsPerGame)
-		homeAttack = (STATS_WEIGHT * homeAttack) + (FORM_WEIGHT * ((teamStat.FP + teamStat.HFP) / 2) * homeAttack)
+		homeAttack = (statsWeight * homeAttack) + (formWeight * ((teamStat.FP + teamStat.HFP) / 2) * homeAttack)
 		teamStat.HomeAttackStrength = homeAttack
 
 		// Home Defense Strength
 		homeDefense := teamStat.HomeGoalsConcededPerGame / makeSensible(roundAverage.MeanHomeGoalsConcededPerGame)
-		homeDefense = (STATS_WEIGHT * homeDefense) + (FORM_WEIGHT * (2 - (teamStat.FP+teamStat.HFP)/2) * homeDefense)
+		homeDefense = (statsWeight * homeDefense) + (formWeight * (2 - (teamStat.FP+teamStat.HFP)/2) * homeDefense)
 		teamStat.HomeDefenseStrength = homeDefense
 
 		// Away Attack Strength
 		awayAttack := teamStat.AwayGoalsPerGame / makeSensible(roundAverage.MeanAwayGoalsPerGame)
-		awayAttack = (STATS_WEIGHT * awayAttack) + (FORM_WEIGHT * ((teamStat.FP + teamStat.AFP) / 2) * awayAttack)
+		awayAttack = (statsWeight * awayAttack) + (formWeight * ((teamStat.FP + teamStat.AFP) / 2) * awayAttack)
 		teamStat.AwayAttackStrength = awayAttack
 
 		// Away Defense Strength
 		awayDefense := teamStat.AwayGoalsConcededPerGame / makeSensible(roundAverage.MeanAwayGoalsConcededPerGame)
-		awayDefense = (STATS_WEIGHT * awayDefense) + (FORM_WEIGHT * (2 - (teamStat.FP+teamStat.AFP)/2) * awayDefense)
+		awayDefense = (statsWeight * awayDefense) + (formWeight * (2 - (teamStat.FP+teamStat.AFP)/2) * awayDefense)
 		teamStat.AwayDefenseStrength = awayDefense
 	}
 

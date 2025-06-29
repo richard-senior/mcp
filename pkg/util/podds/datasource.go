@@ -61,29 +61,23 @@ func GetDatasourceInstance() *Datasource {
 
 // BulkLoadData loads match data for specified leagues and seasons
 func (datasource *Datasource) Update() error {
-	// Initialize database
-	if err := InitDatabase(poddsDbPath); err != nil {
-		return fmt.Errorf("failed to initialize database: %w", err)
-	}
-	defer CloseDatabase()
-
 	// Create tables
 	if err := createTables(); err != nil {
 		return fmt.Errorf("failed to create tables: %w", err)
 	}
 
 	// Ensure cache directory exists
-	if err := os.MkdirAll(poddsCachePath, 0755); err != nil {
+	if err := os.MkdirAll(Config.PoddsCachePath, 0755); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
 	// to start Load data for each league/season combination from fotmob
-	for _, leagueID := range Leagues {
-		for _, season := range Seasons {
+	for _, leagueID := range Config.Leagues {
+		for _, season := range Config.Seasons {
 			logger.Info("Loading data for league", leagueID, "season", season)
 
 			// Pre-load existing matches from database for this league/season
-			existingMatches, err := loadExistingMatches(leagueID, season)
+			existingMatches, err := LoadExistingMatches(leagueID, season)
 			if err != nil {
 				logger.Warn("Failed to load existing matches for", leagueID, season, err)
 				existingMatches = make(map[string]*Match) // Empty cache on error
@@ -92,7 +86,7 @@ func (datasource *Datasource) Update() error {
 			}
 
 			safeSeason := strings.ReplaceAll(season, "/", "-")
-			cacheFilename := fmt.Sprintf(poddsCachePath+"fotmob-%d-%s-league.json", leagueID, safeSeason)
+			cacheFilename := fmt.Sprintf(Config.PoddsCachePath+"fotmob-%d-%s-league.json", leagueID, safeSeason)
 			var pageProps map[string]any
 			// load cache file if it exists
 			_, err = os.Stat(cacheFilename)
@@ -177,8 +171,10 @@ func (datasource *Datasource) Update() error {
 				logger.Info("Didn't get fallback teams?", err)
 			}
 
+			// Remember processed team stats for later during poisson prediction
+			var ts []*TeamStats
 			// Now process team stats for all teams
-			if err := ProcessAndSaveTeamStats(matches, leagueID, season); err != nil {
+			if ts, err = ProcessAndSaveTeamStats(matches, leagueID, season); err != nil {
 				return fmt.Errorf("failed to process team stats: %w", err)
 			}
 
@@ -194,9 +190,8 @@ func (datasource *Datasource) Update() error {
 			datasource.Matches = matches
 
 			// Run Poisson predictions for future matches before saving
-			logger.Info("Running Poisson predictions for future matches")
 			for _, match := range matches {
-				err := PredictMatch(match)
+				err := PredictMatch(match, ts)
 				if err != nil {
 					logger.Warn("Failed to predict match", match.HomeTeamName, "vs", match.AwayTeamName, err)
 					// Continue with other matches even if one fails
@@ -334,7 +329,7 @@ func (f *Datasource) getLeagueData(leagueID int, season string) (map[string]any,
 
 // loadExistingMatches loads all existing matches for a specific league/season from database
 // Uses the existing persistable FindWhere function for consistency and proper ORM handling
-func loadExistingMatches(leagueID int, season string) (map[string]*Match, error) {
+func LoadExistingMatches(leagueID int, season string) (map[string]*Match, error) {
 	// Use the existing persistable FindWhere function
 	results, err := FindWhere(&Match{}, "leagueId = ? AND season = ?", leagueID, season)
 	if err != nil {
