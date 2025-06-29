@@ -61,12 +61,6 @@ type PoddsConfig struct {
 	Over1p5GoalsThreshold float64 // Threshold for over 1.5 goals (default: 1.5)
 	Over2p5GoalsThreshold float64 // Threshold for over 2.5 goals (default: 2.5)
 
-	// === DEFAULT LEAGUE AVERAGES ===
-
-	// Used when no historical data is available
-	DefaultHomeGoalsPerGame float64 // Default home team goals per game (default: 1.5)
-	DefaultAwayGoalsPerGame float64 // Default away team goals per game (default: 1.1)
-
 	// League Team Counts
 	PremierLeagueTeams int // Premier League team count (default: 20)
 	ChampionshipTeams  int // Championship team count (default: 24)
@@ -104,40 +98,36 @@ func DefaultPoddsConfig() *PoddsConfig {
 		CurrentSeasonSecondYear: 2026,
 
 		// === CORE PREDICTION PARAMETERS ===
-		PoissonSimulations: 100000,
-		PoissonRange:       9,
-		MaxGoalsCap:        10.0,
-		MinGoalsFloor:      0.0,
+		PoissonSimulations: 75000,
+		PoissonRange:       8,
+		MaxGoalsCap:        8.00,
+		MinGoalsFloor:      0.050,
 
 		// === TEAM STATISTICS CALCULATION ===
-		FormWeight:          0.3,
-		StatsWeight:         0.7, // Will be recalculated as 1.0 - FormWeight
+		FormWeight:          0.1,
+		StatsWeight:         0.7,
 		MakeSensibleDefault: 1.0,
 
 		// === DIXON-COLES CORRECTION ===
-		DixonColesRho: -0.03,
+		DixonColesRho: -0.010,
 
 		// === TRAVEL DISTANCE (POKE) ADJUSTMENTS ===
 		DerbyDistanceThreshold: 10,
-		DerbyBoostMultiplier:   1.08,
+		DerbyBoostMultiplier:   1.06,
 
-		ShortTravelThreshold:    50,
-		MediumTravelThreshold:   100,
-		LongTravelThreshold:     200,
-		VeryLongTravelThreshold: 300,
+		ShortTravelThreshold:    30,
+		MediumTravelThreshold:   80,
+		LongTravelThreshold:     250,
+		VeryLongTravelThreshold: 325,
 
-		ShortTravelPenalty:    0.98,
+		ShortTravelPenalty:    0.96,
 		MediumTravelPenalty:   0.96,
-		LongTravelPenalty:     0.92,
-		VeryLongTravelPenalty: 0.88,
+		LongTravelPenalty:     0.88,
+		VeryLongTravelPenalty: 0.85,
 
 		// === OVER/UNDER GOALS THRESHOLDS ===
-		Over1p5GoalsThreshold: 1.5,
+		Over1p5GoalsThreshold: 1.3,
 		Over2p5GoalsThreshold: 2.5,
-
-		// === DEFAULT LEAGUE AVERAGES ===
-		DefaultHomeGoalsPerGame: 1.5,
-		DefaultAwayGoalsPerGame: 1.1,
 
 		PremierLeagueTeams: 20,
 		ChampionshipTeams:  24,

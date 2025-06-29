@@ -44,30 +44,31 @@ func PredictMatch(match *Match, teamStats []*TeamStats) error {
 	var err error
 	var homeStats *TeamStats
 	var awayStats *TeamStats
-	var hf = false
-	var af = false
 	// iterate teamStats and find the team stats out of the array for the match home and away teams
 	// if they're not present then try and look them up in the db
 
 	for _, teamStat := range teamStats {
-		if hf && af {
-			break
-		}
 		if teamStat.TeamID == match.HomeID {
-			homeStats = teamStat
-			hf = true
+			if homeStats == nil || teamStat.Round > homeStats.Round {
+				homeStats = teamStat
+			}
 		} else if teamStat.TeamID == match.AwayID {
-			awayStats = teamStat
-			af = true
+			if awayStats == nil || teamStat.Round > awayStats.Round {
+				awayStats = teamStat
+			}
 		}
 	}
-	if homeStats == nil || awayStats == nil {
+	
+	// Only look up missing team stats from database
+	if homeStats == nil {
 		homeStats, err = getTeamStatsFromDb(match.HomeID, match.LeagueID, match.Season)
 		if err != nil {
 			logger.Warn("Could not get home team stats for prediction", match.HomeTeamName, err)
 			return err
 		}
+	}
 
+	if awayStats == nil {
 		awayStats, err = getTeamStatsFromDb(match.AwayID, match.LeagueID, match.Season)
 		if err != nil {
 			logger.Warn("Could not get away team stats for prediction", match.AwayTeamName, err)

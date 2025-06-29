@@ -1,11 +1,12 @@
 # Go Development Standards
 
 ## Project Creation
-- Always create the project as a fo 'module'
+- Always create the project as a go 'module'
 - Use the directory structure outlined below
 - In the root of the project add the following files:
     - build.sh should contain bash code to compile the project into a binary artifact for the current OS
     - run.sh should execute build.sh and then run the compiled binary
+	- test.sh invokes all tests in /tests with "go test -v ./test" etc.
     - .gitignore a gitignore file tailored for go projects
     - README.md a readme file for the project, may be blank initially but should be maintained
 - on project creation you should prompt for a package name (ie "github.com/richardsenior/fooproject")
@@ -17,6 +18,7 @@
   - `/pkg` - Library code that's ok to use by external applications
   - `/api` - OpenAPI/Swagger specs, JSON schema files, protocol definition files
   - `/web` - Web application specific components
+  - `/test` - Unit tests and code intended to invoke functionality for debugging issues
   - `/configs` - Configuration file templates or default configs
   - `/test` - Additional external test apps and test data
 Do not put a main file in the root directory, the main.go file belongs in /cmd
@@ -29,6 +31,12 @@ Do not put a main file in the root directory, the main.go file belongs in /cmd
   - Use ALL_CAPS for constants
   - There is no limit to the length of functions or lines
   - Use meaningful variable names that describe their purpose
+
+## Design standards
+- Use design patterns which facilitate ease of unit testing
+  - Follow something analageous to Java's 'dependency injection' mechanism or SOLID patterns
+  - When writing functions imagine how that function might be tested in isolation
+  - Where possible, write or amend unit tests for all functionality
 
 ## logging
 We should create an /internal/logger/logger.go file. Use this as an example:
@@ -43,10 +51,6 @@ import (
 	"runtime"
 	"strings"
 )
-
-// ********************************************************
-// ********* LOGGING **************************************
-// ********************************************************
 
 var showDateTime bool
 var defaultLogger *Logger
