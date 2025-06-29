@@ -146,30 +146,32 @@ func (datasource *Datasource) Update() error {
 			teams := ExtractTeamsFromMatches(matches)
 
 			// Amend the teams list with any that are found in Fallback
-			fallbackTeams, err := datasource.getFallbackTeams(pageProps)
-			if err == nil && fallbackTeams != nil {
-				//logger.Info("Got Fallback teams", len(fallbackTeams))
-				for _, t := range datasource.Teams {
-					if !ExistsInTeamsArray(teams, t) {
-						tdata, err := TData.GetDataForTeam(t.ID)
-						if err == nil && tdata != nil {
-							//logger.Highlight("Adding team", tdata.Name)
-							foo := &Team{
-								ID:        tdata.Id,
-								Name:      tdata.Name,
-								Latitude:  tdata.Latitude,
-								Longitude: tdata.Longitude,
+			/*
+				fallbackTeams, err := datasource.getFallbackTeams(pageProps)
+				if err == nil && fallbackTeams != nil {
+					//logger.Info("Got Fallback teams", len(fallbackTeams))
+					for _, t := range datasource.Teams {
+						if !ExistsInTeamsArray(teams, t) {
+							tdata, err := TData.GetDataForTeam(t.ID)
+							if err == nil && tdata != nil {
+								//logger.Highlight("Adding team", tdata.Name)
+								foo := &Team{
+									ID:        tdata.Id,
+									Name:      tdata.Name,
+									Latitude:  tdata.Latitude,
+									Longitude: tdata.Longitude,
+								}
+								teams = append(teams, foo)
+							} else {
+								// TODO just add these teams anyway? They're likely foreign teams
+								logger.Highlight("Found a team in Fallback which does not exist in data:", t.Name)
 							}
-							teams = append(teams, foo)
-						} else {
-							// TODO just add these teams anyway? They're likely foreign teams
-							logger.Highlight("Found a team in Fallback which does not exist in data:", t.Name)
 						}
 					}
+				} else {
+					logger.Info("Didn't get fallback teams?", err)
 				}
-			} else {
-				logger.Info("Didn't get fallback teams?", err)
-			}
+			*/
 
 			// Remember processed team stats for later during poisson prediction
 			var ts []*TeamStats

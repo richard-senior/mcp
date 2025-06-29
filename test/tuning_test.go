@@ -41,7 +41,7 @@ var (
 			Name:         "formWeight",
 			FunctionCall: "SetFormWeight", // Uses podds.SetFormWeight(value)
 			Values:       []any{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9},
-			Skip:         true,
+			Skip:         false,
 		},
 		{
 			Name:       "poissonSimulations",
@@ -226,7 +226,7 @@ func TestTuning(t *testing.T) {
 		doTest(param.Name, param.Values, setter)
 		break // Only test first parameter for now
 	}
-	// dumpMatches()
+	dumpMatches()
 }
 
 func doTest(paramName string, values []any, configSetter func(any)) {

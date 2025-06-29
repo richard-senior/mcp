@@ -5,5 +5,5 @@
 
 cd /Users/richard/mcp
 
-echo "🎯 Running parameter tuning test..."
-go test ./test -v -count=1 -run TestTuning
+echo "🎯 Running Podds Update with Predictions"
+go test ./test -v -count=1 -run TestPoddsUpdateWithPredictions

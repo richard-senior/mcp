@@ -85,14 +85,6 @@ func PredictMatch(match *Match, teamStats []*TeamStats) error {
 // amends the passed Match Instance with prediction data
 func DoPredictMatch(match *Match, homeStats *TeamStats, awayStats *TeamStats) error {
 
-	// Only predict in certain circumstances
-	// Prevents reprediction after the fact (after the result is known) which skews
-	// accuracy statistics
-	// unless we're being invoked by a unit test
-	if !shouldPredict(match) {
-		return nil
-	}
-
 	// Calculate Poisson predictions using Monte Carlo simulation with poke adjustments
 	result, err := calculatePoissonPrediction(homeStats, awayStats, match)
 	if err != nil {
@@ -116,16 +108,17 @@ func DoPredictMatch(match *Match, homeStats *TeamStats, awayStats *TeamStats) er
 // shouldPredict determines if we should make a prediction for this match
 // Now simplified since match caching is handled at extraction level
 func shouldPredict(match *Match) bool {
-	// For current season, apply time-based restrictions
+	// Always allow predictions if season is empty (shouldn't happen but be safe)
 	if match.Season == "" {
 		return false
 	}
 
-	if testing.Testing() {
-		return true
+	// Check if match already has predictions (avoid re-prediction)
+	if match.PoissonPredictedHomeGoals != -1 || match.PoissonPredictedAwayGoals != -1 {
+		return false // Already has predictions
 	}
 
-	GetSecondYear(match.Season)
+	// For current season, apply time-based restrictions to avoid predicting matches too close to kickoff
 	if match.Season == GetCurrentSeason() {
 		// Only predict for future matches that are more than the configured time buffer away
 		now := time.Now()
@@ -155,12 +148,7 @@ func shouldPredict(match *Match) bool {
 		}
 	}
 
-	// Check if match already has predictions (from cache or new calculation)
-	if match.PoissonPredictedHomeGoals != -1 || match.PoissonPredictedAwayGoals != -1 {
-		return false // Already has predictions
-	}
-
-	// For historical seasons, predict if no existing prediction
+	// For historical seasons, always predict if no existing prediction
 	// This allows us to test our predictions against historical results
 	return true
 }

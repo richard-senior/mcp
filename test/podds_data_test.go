@@ -6,27 +6,6 @@ import (
 	"github.com/richard-senior/mcp/pkg/util/podds"
 )
 
-func TestTeamData(t *testing.T) {
-	t.Log("--TEAMS LIST--")
-	data := podds.GetDataInstance()
-	// iterate the map data.TeamsData and echo out the key and the value of fotmobId ie Accrington:8671, Aldershot:8465 etc.
-	for k, v := range data.TeamsData {
-		t.Log(k, v.Id)
-	}
-	t.Log("--TEAMS LIST--")
-}
-
-// Tests the online lookup of teamname for fotmobId
-/*
-func TestLookupTeamName(t *testing.T) {
-	tn, err := podds.LookupTeamNameForId(8671)
-	if err != nil {
-		t.Error(err)
-	}
-	t.Log("Team name is " + tn)
-}
-*/
-
 // TestInitialPositionsValidation validates INITIAL_POSITIONS against FINAL_POSITIONS from previous seasons
 func TestInitialPositionsValidation(t *testing.T) {
 	data := podds.GetDataInstance()
