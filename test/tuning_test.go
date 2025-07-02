@@ -10,15 +10,15 @@ import (
 
 // PredictionResult holds the results of a prediction test
 type PredictionResult struct {
-	CorrectPredictions int
-	TotalPredictions   int
-	TotalHomeWinProb   float64
-	TotalDrawProb      float64
-	TotalAwayWinProb   float64
-	PredictedMatches   int
-	SkippedMatches     int
-	TotalScoreInaccuracy int     // Sum of all score inaccuracies
-	ScoreInaccuracyCount int     // Number of matches with score predictions
+	CorrectPredictions   int
+	TotalPredictions     int
+	TotalHomeWinProb     float64
+	TotalDrawProb        float64
+	TotalAwayWinProb     float64
+	PredictedMatches     int
+	SkippedMatches       int
+	TotalScoreInaccuracy int // Sum of all score inaccuracies
+	ScoreInaccuracyCount int // Number of matches with score predictions
 }
 
 // TuningParam defines a parameter to tune with its configuration path and values
@@ -268,7 +268,7 @@ func doIteration(val any) {
 	accuracy := result.CalculateAccuracy()
 	avgHomeWin, avgDraw, avgAwayWin := result.GetAverageProbabilities()
 	avgScoreInaccuracy := result.GetAverageScoreInaccuracy()
-	
+
 	// Track best accuracy
 	if accuracy > bestAccuracy {
 		bestAccuracy = accuracy
@@ -346,7 +346,7 @@ func RunPredictionsWithConfig() *PredictionResult {
 			homeGoalDiff := abs(match.ActualHomeGoals - match.PoissonPredictedHomeGoals)
 			awayGoalDiff := abs(match.ActualAwayGoals - match.PoissonPredictedAwayGoals)
 			scoreInaccuracy := homeGoalDiff + awayGoalDiff
-			
+
 			result.TotalScoreInaccuracy += scoreInaccuracy
 			result.ScoreInaccuracyCount++
 		}

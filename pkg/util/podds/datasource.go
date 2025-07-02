@@ -135,7 +135,7 @@ func (datasource *Datasource) Update() error {
 				}
 			}
 			//process all the data
-			fotmobMatches, err := datasource.processFotmobMatchData(pageProps, existingMatches)
+			fotmobMatches, err := datasource.processFotmobMatchData(pageProps, existingMatches, leagueID, season)
 			if err != nil {
 				return fmt.Errorf("error processing fotmob match data: %w", err)
 			}
@@ -215,37 +215,13 @@ func (datasource *Datasource) ProcessLeagueMatches(fm []*Match, fdm []*Match) (*
 /**
 * ProcessData takes the raw match and team data and returns an array of partially populated matches
  */
-func (datasource *Datasource) processFotmobMatchData(pageProps map[string]any, existingMatches map[string]*Match) ([]*Match, error) {
-	// get leagueId and season from pageProps
-	// does pageProps have a 'details' key?
-	details, ok := pageProps["details"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("Failed to find details stanza in pageProps")
-	}
-
-	id, ok := details["id"].([]any)
-	if !ok {
-		return nil, fmt.Errorf("Failed to find league id pageProps#details")
-	}
-	leagueID, err := util.GetAsInteger(id)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to convert pageProps#details#id (%w) to an integer", id)
-	}
-	s, ok := details["selectedSeason"].([]any)
-	if !ok {
-		return nil, fmt.Errorf("Failed to find season pageProps#details")
-	}
-	season, err := util.GetAsString(s)
-	if err != nil {
-		return nil, fmt.Errorf("Failed convert season (%w) to string", s)
-	}
+func (datasource *Datasource) processFotmobMatchData(pageProps map[string]any, existingMatches map[string]*Match, leagueID int, season string) ([]*Match, error) {
 	// lets start by processing and bulk saving matches etc.
 	// parse the pageProps to get an array of matches for this season
 	matches, err := datasource.extractMatchesWithCache(pageProps, existingMatches)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting matches: %w", err)
 	}
-
 	// Set league ID and season for all matches
 	for _, match := range matches {
 		match.LeagueID = leagueID
