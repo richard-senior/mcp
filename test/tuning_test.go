@@ -17,6 +17,8 @@ type PredictionResult struct {
 	TotalAwayWinProb   float64
 	PredictedMatches   int
 	SkippedMatches     int
+	TotalScoreInaccuracy int     // Sum of all score inaccuracies
+	ScoreInaccuracyCount int     // Number of matches with score predictions
 }
 
 // TuningParam defines a parameter to tune with its configuration path and values
@@ -243,8 +245,8 @@ func doTest(paramName string, values []any, configSetter func(any)) {
 }
 
 func printHeader(paramName string) {
-	fmt.Printf("%s | Correct | Total | Accuracy | Avg Home Win | Avg Draw | Avg Away Win | Predicted | Skipped\n", paramName)
-	fmt.Printf("-----------|---------|-------|----------|--------------|----------|--------------|-----------|--------\n")
+	fmt.Printf("%s | Correct | Total | Accuracy | Avg Home Win | Avg Draw | Avg Away Win | Avg Score Inaccuracy | Predicted | Skipped\n", paramName)
+	fmt.Printf("-----------|---------|-------|----------|--------------|----------|--------------|----------------------|-----------|--------\n")
 }
 
 func printFooter(paramName string) {
@@ -265,6 +267,8 @@ func doIteration(val any) {
 	result = RunPredictionsWithConfig()
 	accuracy := result.CalculateAccuracy()
 	avgHomeWin, avgDraw, avgAwayWin := result.GetAverageProbabilities()
+	avgScoreInaccuracy := result.GetAverageScoreInaccuracy()
+	
 	// Track best accuracy
 	if accuracy > bestAccuracy {
 		bestAccuracy = accuracy
@@ -282,8 +286,8 @@ func doIteration(val any) {
 		valStr = fmt.Sprintf("%v", v)
 	}
 
-	fmt.Printf("   %-8s |   %3d   |  %3d  |  %6.2f%%  |    %6.2f%%    |  %6.2f%%  |   %6.2f%%   |    %3d    |   %3d\n",
-		valStr, result.CorrectPredictions, result.TotalPredictions, accuracy, avgHomeWin, avgDraw, avgAwayWin, result.PredictedMatches, result.SkippedMatches)
+	fmt.Printf("   %-8s |   %3d   |  %3d  |  %6.2f%%  |    %6.2f%%    |  %6.2f%%  |   %6.2f%%   |        %6.2f        |    %3d    |   %3d\n",
+		valStr, result.CorrectPredictions, result.TotalPredictions, accuracy, avgHomeWin, avgDraw, avgAwayWin, avgScoreInaccuracy, result.PredictedMatches, result.SkippedMatches)
 }
 
 // Dump out the matches to console showing:
@@ -337,6 +341,16 @@ func RunPredictionsWithConfig() *PredictionResult {
 		result.TotalDrawProb += match.PoissonDrawProbability
 		result.TotalAwayWinProb += match.PoissonAwayWinProbability
 
+		// Calculate score inaccuracy if we have predicted scores
+		if match.PoissonPredictedHomeGoals != -1 && match.PoissonPredictedAwayGoals != -1 {
+			homeGoalDiff := abs(match.ActualHomeGoals - match.PoissonPredictedHomeGoals)
+			awayGoalDiff := abs(match.ActualAwayGoals - match.PoissonPredictedAwayGoals)
+			scoreInaccuracy := homeGoalDiff + awayGoalDiff
+			
+			result.TotalScoreInaccuracy += scoreInaccuracy
+			result.ScoreInaccuracyCount++
+		}
+
 		// Determine actual result
 		actualResult := ""
 		if match.ActualHomeGoals > match.ActualAwayGoals {
@@ -381,6 +395,22 @@ func (pr *PredictionResult) GetAverageProbabilities() (homeWin, draw, awayWin fl
 	return pr.TotalHomeWinProb / float64(pr.TotalPredictions),
 		pr.TotalDrawProb / float64(pr.TotalPredictions),
 		pr.TotalAwayWinProb / float64(pr.TotalPredictions)
+}
+
+// GetAverageScoreInaccuracy returns the average score inaccuracy
+func (pr *PredictionResult) GetAverageScoreInaccuracy() float64 {
+	if pr.ScoreInaccuracyCount == 0 {
+		return 0.0
+	}
+	return float64(pr.TotalScoreInaccuracy) / float64(pr.ScoreInaccuracyCount)
+}
+
+// abs returns the absolute value of an integer
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // createConfigSetter creates a setter function for a parameter using reflection

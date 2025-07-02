@@ -15,6 +15,8 @@ type PoddsConfig struct {
 	Seasons                 []string // the list of seasons we're interested in
 	CurrentSeasonFirstYear  int      // the first year of the current season
 	CurrentSeasonSecondYear int      // the second year of the current season
+	CurrentSeason           string   // the current season (e.g. 2023-2024)
+	PredictionTimeBuffer    int      // Minutes before match to stop predictions (default: 15)
 
 	// === CORE PREDICTION PARAMETERS ===
 
@@ -68,12 +70,6 @@ type PoddsConfig struct {
 	LeagueTwoTeams     int // League Two team count (default: 24)
 	DefaultLeagueTeams int // Default assumption for unknown leagues (default: 20)
 
-	// === TIME-BASED RESTRICTIONS ===
-
-	// Current Season Settings
-	CurrentSeason        string // Current season for predictions (default: "2025/2026")
-	PredictionTimeBuffer int    // Minutes before match to stop predictions (default: 15)
-
 	// === FORM CALCULATION PARAMETERS ===
 
 	// Form calculation uses quaternary system (0=loss, 1=loss, 2=draw, 3=win)
@@ -96,6 +92,8 @@ func DefaultPoddsConfig() *PoddsConfig {
 		Seasons:                 []string{"2010/2011", "2011/2012", "2012/2013", "2013/2014", "2014/2015", "2015/2016", "2016/2017", "2017/2018", "2018/2019", "2019/2020", "2020/2021", "2021/2022", "2022/2023", "2023/2024", "2024/2025", "2025/2026"},
 		CurrentSeasonFirstYear:  2025,
 		CurrentSeasonSecondYear: 2026,
+		CurrentSeason:           "2025/2025",
+		PredictionTimeBuffer:    15,
 
 		// === CORE PREDICTION PARAMETERS ===
 		PoissonSimulations: 75000,
@@ -134,10 +132,6 @@ func DefaultPoddsConfig() *PoddsConfig {
 		LeagueOneTeams:     24,
 		LeagueTwoTeams:     24,
 		DefaultLeagueTeams: 20,
-
-		// === TIME-BASED RESTRICTIONS ===
-		CurrentSeason:        "2025/2026",
-		PredictionTimeBuffer: 15,
 
 		// === FORM CALCULATION PARAMETERS ===
 		FormLossValue: 1,

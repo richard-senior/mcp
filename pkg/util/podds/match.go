@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/richard-senior/mcp/internal/logger"
@@ -33,30 +35,51 @@ type Match struct {
 	AwayID       string `json:"awayId" column:"awayId" dbtype:"TEXT NOT NULL" index:"true"`
 
 	// Core match data (compressed from complex status fields)
-	ActualHomeGoals int `json:"actualHomeGoals" column:"actualHomeGoals" dbtype:"INTEGER DEFAULT -1"`
-	ActualAwayGoals int `json:"actualAwayGoals" column:"actualAwayGoals" dbtype:"INTEGER DEFAULT -1"`
-	
+	ActualHomeGoals         int `json:"actualHomeGoals" column:"actualHomeGoals" dbtype:"INTEGER DEFAULT -1"`
+	ActualHalfTimeHomeGoals int `json:"actualHalfTimeHomeGoals" column:"actualHalfTimeHomeGoals" dbtype:"INTEGER DEFAULT -1"`
+	ActualAwayGoals         int `json:"actualAwayGoals" column:"actualAwayGoals" dbtype:"INTEGER DEFAULT -1"`
+	ActualHalfTimeAwayGoals int `json:"actualHalfTimeAwayGoals" column:"actualHalfTimeAwayGoals" dbtype:"INTEGER DEFAULT -1"`
+
 	// Poisson Prediction Fields
-	PoissonPredictedHomeGoals int `json:"poissonPredictedHomeGoals,omitempty" column:"poissonPredictedHomeGoals" dbtype:"INTEGER DEFAULT -1" `
-	PoissonPredictedAwayGoals int `json:"poissonPredictedAwayGoals,omitempty" column:"poissonPredictedAwayGoals" dbtype:"INTEGER DEFAULT -1" `
-	
+	PoissonPredictedHomeGoals         int `json:"poissonPredictedHomeGoals,omitempty" column:"poissonPredictedHomeGoals" dbtype:"INTEGER DEFAULT -1" `
+	PoissonPredictedHalfTimeHomeGoals int `json:"poissonPredictedHalfTimeHomeGoals,omitempty" column:"poissonPredictedHalfTimeHomeGoals" dbtype:"INTEGER DEFAULT -1" `
+	PoissonPredictedAwayGoals         int `json:"poissonPredictedAwayGoals,omitempty" column:"poissonPredictedAwayGoals" dbtype:"INTEGER DEFAULT -1" `
+	PoissonPredictedHalfTimeAwayGoals int `json:"poissonPredictedHalfTimeAwayGoals,omitempty" column:"poissonPredictedHalfTimeAwayGoals" dbtype:"INTEGER DEFAULT -1" `
+
 	// Expected Goals (from Poisson calculation)
 	HomeTeamGoalExpectency float64 `json:"homeTeamGoalExpectency,omitempty" column:"homeTeamGoalExpectency" dbtype:"REAL DEFAULT -1.0"`
 	AwayTeamGoalExpectency float64 `json:"awayTeamGoalExpectency,omitempty" column:"awayTeamGoalExpectency" dbtype:"REAL DEFAULT -1.0"`
-	
+
 	// Win/Draw/Loss Probabilities (percentages)
 	PoissonHomeWinProbability float64 `json:"poissonHomeWinProbability,omitempty" column:"poissonHomeWinProbability" dbtype:"REAL DEFAULT -1.0"`
 	PoissonDrawProbability    float64 `json:"poissonDrawProbability,omitempty" column:"poissonDrawProbability" dbtype:"REAL DEFAULT -1.0"`
 	PoissonAwayWinProbability float64 `json:"poissonAwayWinProbability,omitempty" column:"poissonAwayWinProbability" dbtype:"REAL DEFAULT -1.0"`
-	
+
 	// Over/Under Goals Probabilities (percentages)
 	Over1p5Goals float64 `json:"over1p5Goals,omitempty" column:"over1p5Goals" dbtype:"REAL DEFAULT -1.0"`
 	Over2p5Goals float64 `json:"over2p5Goals,omitempty" column:"over2p5Goals" dbtype:"REAL DEFAULT -1.0"`
+
+	// Average Betting Odds (from football-data.co.uk)
+	ActualHomeOdds float64 `json:"actualHomeOdds,omitempty" column:"actualHomeOdds" dbtype:"REAL DEFAULT -1.0"`
+	ActualDrawOdds float64 `json:"actualDrawOdds,omitempty" column:"actualDrawOdds" dbtype:"REAL DEFAULT -1.0"`
+	ActualAwayOdds float64 `json:"actualAwayOdds,omitempty" column:"actualAwayOdds" dbtype:"REAL DEFAULT -1.0"`
 
 	// Match details
 	MatchUrl string `json:"pageUrl" column:"matchUrl" dbtype:"TEXT"`
 	Poke     int    `json:"poke,omitempty" column:"poke" dbtype:"INTEGER DEFAULT -1"`
 	Referee  string `json:"referee,omitempty" column:"referee" dbtype:"TEXT"`
+
+	// Action
+	HomeShotsOnTarget int `json:"homeShotsOnTarget,omitempty" column:"homeShotsOnTarget" dbtype:"INTEGER DEFAULT -1"`
+	AwayShotsOnTarget int `json:"awayShotsOnTarget,omitempty" column:"awayShotsOnTarget" dbtype:"INTEGER DEFAULT -1"`
+	HomeCorners       int `json:"homeCorners,omitempty" column:"homeCorners" dbtype:"INTEGER DEFAULT -1"`
+	AwayCorners       int `json:"awayCorners,omitempty" column:"awayCorners" dbtype:"INTEGER DEFAULT -1"`
+
+	// Discipline
+	HomeYellowCards int `json:"homeYellowCards,omitempty" column:"homeYellowCards" dbtype:"INTEGER DEFAULT -1"`
+	AwayYellowCards int `json:"awayYellowCards,omitempty" column:"awayYellowCards" dbtype:"INTEGER DEFAULT -1"`
+	HomeRedCards    int `json:"homeRedCards,omitempty" column:"homeRedCards" dbtype:"INTEGER DEFAULT -1"`
+	AwayRedCards    int `json:"awayRedCards,omitempty" column:"awayRedCards" dbtype:"INTEGER DEFAULT -1"`
 
 	// Metadata
 	CreatedAt time.Time `json:"createdAt" column:"created_at" dbtype:"DATETIME DEFAULT CURRENT_TIMESTAMP"`
@@ -121,9 +144,37 @@ func (m *Match) AfterDelete() error {
 	return nil
 }
 
-/////////////////////////////////////////////////////////////////////////
-////// Data Processing Methods (Following PODDS Pattern)
-/////////////////////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////
+// //// Data Processing Methods (Following PODDS Pattern)
+// ///////////////////////////////////////////////////////////////////////
+// Returns true if we should recalculate this match, based upon its UTCTime and
+// whether or not certain fields are populated such as actualHomeGoals etc.
+func (m *Match) ShouldProcess() bool {
+	if m.Season == "" || m.LeagueID == -1 {
+		return true
+	}
+	// if we have no predictions for this match then we should predict some
+	if m.PoissonPredictedHomeGoals == -1 || m.PoissonPredictedAwayGoals == -1 {
+		return true
+	}
+	// it's naughty but I'm going to do it
+	// generally coding anything relating to testing into the codebase is
+	// but.. since this is MY codebase I'll do what I like, because I'm not 8 years old
+	// and you can't make me
+	if testing.Testing() {
+		return true
+	}
+	// ok we already have predictions so we should probably not predict
+	// however if this is the current season we need to keep predicting as new data comes in
+	// up to about 'n' (probs 15) minutes before the match
+	now := time.Now()
+	timeBuffer := time.Duration(GetPredictionTimeBuffer()) * time.Minute
+	bufferTime := now.Add(timeBuffer)
+	if !m.UTCTime.Before(bufferTime) {
+		return true
+	}
+	return false
+}
 
 // ProcessMatchData processes and compresses incoming data
 func (m *Match) ProcessMatchData() {
@@ -240,7 +291,114 @@ func NewMatch() *Match {
 		Over1p5Goals:              -1.0,
 		Over2p5Goals:              -1.0,
 		Poke:                      -1,
+		ActualHomeOdds:            -1.0,
+		ActualDrawOdds:            -1.0,
+		ActualAwayOdds:            -1.0,
+		HomeShotsOnTarget:         -1,
+		AwayShotsOnTarget:         -1,
+		HomeCorners:               -1,
+		AwayCorners:               -1,
+		HomeYellowCards:           -1,
+		AwayYellowCards:           -1,
+		HomeRedCards:              -1,
+		AwayRedCards:              -1,
 	}
+}
+
+// Merges the data from n into m if the data in m
+// is missing and n has it
+func (m *Match) Merge(n *Match) error {
+	if n == nil {
+		return fmt.Errorf("must pass a match")
+	}
+
+	// Use reflection to iterate through all fields
+	mVal := reflect.ValueOf(m).Elem()
+	nVal := reflect.ValueOf(n).Elem()
+	mType := mVal.Type()
+
+	for i := 0; i < mVal.NumField(); i++ {
+		field := mVal.Field(i)
+		fieldType := mType.Field(i)
+		nField := nVal.Field(i)
+
+		// Skip unexported fields
+		if !field.CanSet() {
+			continue
+		}
+
+		switch field.Kind() {
+		case reflect.String:
+			// If string field is empty, copy from n
+			if field.String() == "" && nField.String() != "" {
+				field.SetString(nField.String())
+			}
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			// If int field is -1, copy from n
+			if field.Int() == -1 && nField.Int() != -1 {
+				field.SetInt(nField.Int())
+			}
+		case reflect.Float32, reflect.Float64:
+			// If float field is -1.0, copy from n
+			if field.Float() == -1.0 && nField.Float() != -1.0 {
+				field.SetFloat(nField.Float())
+			}
+		case reflect.Struct:
+			// Special handling for time.Time
+			if fieldType.Type == reflect.TypeOf(time.Time{}) {
+				timeField := field.Interface().(time.Time)
+				nTimeField := nField.Interface().(time.Time)
+				if timeField.IsZero() && !nTimeField.IsZero() {
+					field.Set(nField)
+				}
+			}
+		default:
+			// if the field in m is nil, just replace it with the content of the field in n
+			logger.Info("failed to determine field type", fieldType.Type)
+		}
+	}
+	return nil
+}
+
+/**
+* Returns true if the given Match object is ostensibly the same match
+* That is, if it has the same match ID or refers to the same date, league, teams etc.
+ */
+func (m *Match) Equals(n *Match) bool {
+	if n == nil {
+		return false
+	}
+	// if the matchId is the same, it's the same match
+	// regardless of any other content
+	if m.ID == n.ID {
+		return true
+	}
+	if m.HomeID == "" && m.LeagueID == -1 && m.Season == "" && m.UTCTime.IsZero() {
+		return false
+	}
+	// If we're not the same teams
+	if m.HomeID != n.HomeID || m.AwayID != n.AwayID {
+		return false
+	}
+	// not same league or season?
+	if m.LeagueID != n.LeagueID || m.Season != n.Season {
+		return false
+	}
+	if m.ActualHomeGoals != -1 && n.ActualAwayGoals != -1 {
+		if m.ActualHomeGoals != n.ActualHomeGoals || m.ActualAwayGoals != n.ActualAwayGoals {
+			return false
+		}
+	}
+	if !m.UTCTime.IsZero() {
+		if n.UTCTime.IsZero() {
+			return false
+		}
+		// if these two matches aren't on the same day, they're not the same match
+		if m.UTCTime.Year() != n.UTCTime.Year() || m.UTCTime.YearDay() != n.UTCTime.YearDay() {
+			return false
+		}
+	}
+	return true
 }
 
 // extractCoreFields pulls out the essential match data

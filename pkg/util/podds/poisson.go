@@ -5,7 +5,6 @@ import (
 	"math"
 	"math/rand"
 	"strconv"
-	"testing"
 	"time"
 
 	"github.com/richard-senior/mcp/internal/logger"
@@ -34,10 +33,7 @@ type PoissonResult struct {
 func PredictMatch(match *Match, teamStats []*TeamStats) error {
 
 	// Only predict in certain circumstances
-	// Prevents reprediction after the fact (after the result is known) which skews
-	// accuracy statistics
-	// unless we're being invoked by a unit test
-	if !testing.Testing() && !shouldPredict(match) {
+	if !match.ShouldProcess() {
 		return nil
 	}
 
@@ -58,7 +54,7 @@ func PredictMatch(match *Match, teamStats []*TeamStats) error {
 			}
 		}
 	}
-	
+
 	// Only look up missing team stats from database
 	if homeStats == nil {
 		homeStats, err = getTeamStatsFromDb(match.HomeID, match.LeagueID, match.Season)
@@ -103,54 +99,6 @@ func DoPredictMatch(match *Match, homeStats *TeamStats, awayStats *TeamStats) er
 	match.Over2p5Goals = result.Over2p5GoalsProbability
 
 	return nil
-}
-
-// shouldPredict determines if we should make a prediction for this match
-// Now simplified since match caching is handled at extraction level
-func shouldPredict(match *Match) bool {
-	// Always allow predictions if season is empty (shouldn't happen but be safe)
-	if match.Season == "" {
-		return false
-	}
-
-	// Check if match already has predictions (avoid re-prediction)
-	if match.PoissonPredictedHomeGoals != -1 || match.PoissonPredictedAwayGoals != -1 {
-		return false // Already has predictions
-	}
-
-	// For current season, apply time-based restrictions to avoid predicting matches too close to kickoff
-	if match.Season == GetCurrentSeason() {
-		// Only predict for future matches that are more than the configured time buffer away
-		now := time.Now()
-		if match.UTCTime.Before(now) {
-			return false
-		}
-
-		// Don't predict matches that start within the configured time buffer
-		timeBuffer := time.Duration(GetPredictionTimeBuffer()) * time.Minute
-		bufferTime := now.Add(timeBuffer)
-		if match.UTCTime.Before(bufferTime) {
-			return false
-		}
-
-		// Only predict for matches that haven't been played yet
-		switch match.Status {
-		case "finished", "played", "completed", "final", "ended":
-			return false
-		case "scheduled", "upcoming", "fixture", "not_started", "":
-			return true
-		default:
-			// For unknown statuses, check if goals are already set
-			if match.ActualHomeGoals >= 0 && match.ActualAwayGoals >= 0 {
-				return false // Match has been played
-			}
-			return true // Assume it's a future match
-		}
-	}
-
-	// For historical seasons, always predict if no existing prediction
-	// This allows us to test our predictions against historical results
-	return true
 }
 
 // EvaluatePredictionAccuracy compares predictions with actual results for testing

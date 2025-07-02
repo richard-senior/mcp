@@ -6,16 +6,18 @@ import (
 	"github.com/richard-senior/mcp/pkg/util"
 )
 
-// Compile-time check to ensure Match implements Persistable interface
-var _ Persistable = (*Match)(nil)
-
-// Match represents a football match with database persistence and JSON processing annotations
+// Season Holds information about the overall performance of a given season for a given team
+// Useful for visualisations and being able to predict from previous seasons when new seasons start and have
+// very little data
 type Season struct {
-	Year   string `json:"year,omitempty" column:"year" dbtype:"TEXT" primary:"true" index:"true"`
+	Years  string `json:"year,omitempty" column:"year" dbtype:"TEXT" primary:"true" index:"true"`
 	League int    `json:"league,omitempty" column:"league" dbtype:"INTEGER" primary:"true" index:"true"`
 	TeamId int    `json:"teamid,omitempty" column:"teamid" dbtype:"INTEGER" primary:"true" index:"true"`
 }
 
+/**
+*
+ */
 func ParseSeason(season any) (string, error) {
 	if season == nil {
 		return "", fmt.Errorf("must pass a season")
@@ -36,10 +38,19 @@ func ParseSeason(season any) (string, error) {
 	// this could be a short form season of the type YYYY/YY as in 2023/24 (again delimiter may be hyphen)
 	// we should return it by determining the missing prefix in the abbreviated year and adding it in
 	if len(ss) == 7 && ss[4] == '-' {
-		return fmt.Sprintf("20%s/%s", ss[:2], ss[3:]), nil
+		return fmt.Sprintf("20%s/20%s", ss[:2], ss[3:]), nil
 	} else if len(ss) == 7 && ss[4] == '/' {
-		return fmt.Sprintf("20%s/%s", ss[:2], ss[3:]), nil
+		return fmt.Sprintf("20%s/20%s", ss[:2], ss[3:]), nil
 	}
+	// 2425
+	if len(ss) == 4 {
+		return fmt.Sprintf("20%s/20%s", ss[:2], ss[2:]), nil
+	}
+	// 24/25
+	if len(ss) == 5 && (ss[2] == '-' || ss[2] == '/') {
+		return fmt.Sprintf("20%s/20%s", ss[:2], ss[3:]), nil
+	}
+
 	// this could be an encoded league/season format of the form:
 	// 472324 as in leagueId=47 season=2023/2024 we should unencode it and return the season data only
 	// bear in mind that the leagueID is not a fixed length (may be 47, may be 108 orn any other number etc.
@@ -59,6 +70,17 @@ func GetFirstYear(season any) (int, error) {
 	}
 	// split on "/" and return the first token
 	return util.GetAsInteger(s[:4])
+}
+
+func IsCurrentSeason(season any) bool {
+	s, err := ParseSeason(season)
+	if err != nil {
+		return false
+	}
+	if s == GetCurrentSeason() {
+		return true
+	}
+	return false
 }
 
 // Given a season of the form yyyy/yyyy+1 return the second year

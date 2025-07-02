@@ -389,6 +389,27 @@ func calculateLeaguePositions(teamStats []*TeamStats) {
 ////// Persistable Interface Implementation
 /////////////////////////////////////////////////////////////////////////
 
+func SaveTeamStats(teamStats []*TeamStats) error {
+	logger.Info("Saving TeamStats to database", len(teamStats))
+
+	// Convert all matches to Persistable for BulkSave
+	// The Save function in persistable handles INSERT/UPDATE automatically
+	var persistableStats []Persistable
+	for _, ts := range teamStats {
+		persistableStats = append(persistableStats, ts)
+	}
+
+	if len(persistableStats) > 0 {
+		if err := BulkSave(persistableStats); err != nil {
+			return fmt.Errorf("failed to bulk save TeamStats: %w", err)
+		}
+		logger.Info("Bulk saved/updated TeamStats", len(persistableStats))
+	} else {
+		logger.Info("No TeamStats to save")
+	}
+	return nil
+}
+
 // GetPrimaryKey returns the compound primary key as a map
 func (ts *TeamStats) GetPrimaryKey() map[string]interface{} {
 	return map[string]any{

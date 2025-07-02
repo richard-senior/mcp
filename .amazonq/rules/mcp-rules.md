@@ -1,6 +1,9 @@
 # Rules for this project (mcp)
 This project is an implementation of an MCP tools and resources server designed to be compatible with Amazon Q Chat.
 
+*Important* Please do not carry out work that is not directly requested. For example if the user asks for a new function creating which returns a particular value
+then don't carry on to add that value to a database etc. Even if you think it is correct.
+
 # Tool creation
 - A tool is a single go file stored in the ./pkg/tools directory
 - A tool has the following structure:
