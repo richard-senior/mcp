@@ -76,33 +76,91 @@ func HandleMemeTool(params any) (any, error) {
 		logger.Info("Saving meme to " + filepath)
 	}
 
-	// Calculate font size based on image width
-	// Assuming average word length of 5 characters and targeting 5 words per line
-	// Each character is approximately 0.6 times the font size in width
-	averageWordLength := 5
-	targetWordsPerLine := 5
-	charactersPerLine := averageWordLength * targetWordsPerLine
-
-	// Calculate font size: imageWidth / (charactersPerLine * 0.6)
-	// The 0.6 factor is an approximation of character width to font size ratio
-	// We subtract 60 from width to account for margins (30px on each side)
-	fontSize := (svg.Width - 60) / (charactersPerLine * 6 / 10)
-
-	// Set minimum and maximum font sizes
-	if fontSize < 18 {
-		fontSize = 18 // Minimum font size for readability
-	} else if fontSize > 48 {
-		fontSize = 60 // Maximum font size to prevent excessive text size
+	// Calculate optimal font size and positioning to ensure text fits within image bounds
+	margin := 20 // Margin from edges
+	textAreaWidth := svg.Width - (2 * margin)
+	
+	// Estimate number of lines needed based on text length and available width
+	// Average character width is approximately 0.6 times font size
+	words := len(text) / 5 // Rough estimate of word count (5 chars per word average)
+	if words < 1 {
+		words = 1
 	}
+	
+	// Start with a reasonable font size and adjust
+	fontSize := 24
+	maxFontSize := svg.Height / 8 // Don't let font be more than 1/8 of image height
+	minFontSize := 12
+	
+	// Calculate how much vertical space we want to reserve for text (bottom 25% of image)
+	textAreaHeight := svg.Height / 4
+	if textAreaHeight < 60 {
+		textAreaHeight = 60 // Minimum text area height
+	}
+	
+	// Iteratively find the best font size that fits
+	for fontSize > minFontSize {
+		avgCharWidth := float64(fontSize) * 0.6
+		charsPerLine := int(float64(textAreaWidth) / avgCharWidth)
+		
+		if charsPerLine > 0 {
+			// Estimate number of lines needed
+			estimatedLines := (len(text) + charsPerLine - 1) / charsPerLine // Ceiling division
+			if estimatedLines < 1 {
+				estimatedLines = 1
+			}
+			
+			// Calculate total text height (including line spacing)
+			lineHeight := int(float64(fontSize) * 1.2) // 1.2 line spacing
+			totalTextHeight := estimatedLines * lineHeight
+			
+			// Check if text fits in our reserved area
+			if totalTextHeight <= textAreaHeight && fontSize <= maxFontSize {
+				break
+			}
+		}
+		
+		fontSize -= 2 // Reduce font size and try again
+	}
+	
+	// Ensure minimum font size
+	if fontSize < minFontSize {
+		fontSize = minFontSize
+	}
+	
+	logger.Inform("Using font size: ", fontSize, " for image dimensions: ", svg.Width, "x", svg.Height)
 
-	fontStyle := fmt.Sprintf("font-weight: bold; font-size: %dpx; font-family: 'Comic Sans MS'; fill: red;", fontSize)
-	logger.Inform("Using font size for image width: ", fontSize, svg.Width)
+	// Create font style with calculated size
+	fontStyle := fmt.Sprintf("font-weight: bold; font-size: %dpx; font-family: 'Impact', 'Arial Black', sans-serif; fill: white; stroke: black; stroke-width: 1px;", fontSize)
+	
+	// Position text in the bottom area of the image
+	// Calculate Y position to ensure text doesn't overflow
+	lineHeight := int(float64(fontSize) * 1.2)
+	
+	// Estimate how many lines we'll actually have with this font size
+	avgCharWidth := float64(fontSize) * 0.6
+	charsPerLine := int(float64(textAreaWidth) / avgCharWidth)
+	estimatedLines := 1
+	if charsPerLine > 0 {
+		estimatedLines = (len(text) + charsPerLine - 1) / charsPerLine
+	}
+	
+	totalTextHeight := estimatedLines * lineHeight
+	
+	// Position text so it's in the bottom portion but doesn't overflow
+	// Start from bottom and work up, leaving some margin
+	textYPosition := svg.Height - margin - totalTextHeight + lineHeight // +lineHeight because SVG text Y is baseline
+	
+	// Ensure text doesn't start too high up (maintain some separation from image content)
+	minYPosition := svg.Height * 2 / 3 // Don't start text higher than 2/3 down the image
+	if textYPosition < minYPosition {
+		textYPosition = minYPosition
+	}
+	
+	logger.Inform("Placing text at Y position: ", textYPosition, " (estimated lines: ", estimatedLines, ", total text height: ", totalTextHeight, ")")
 
-	// make text appear at the bottom at approximately 4/5ths of the image height
-	textYPosition := int(float64(svg.Height) * 0.8)
-	logger.Inform("Placing text at Y position: ", textYPosition, " (image height: ", svg.Height, ")")
-
-	svg.AddWrappedText("cheezymeme", text, fontStyle, 20, textYPosition, svg.Width-60, 30, 1)
+	// Add the text with wrapping
+	svg.AddWrappedText("cheezymeme", text, fontStyle, margin, textYPosition, textAreaWidth, lineHeight, 1)
 
 	outputPath := "./cheezymeme.svg"
 	if filepath != "" {

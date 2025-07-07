@@ -1,0 +1,54 @@
+{
+  "digital_inputs": {
+    "0": "DI 00",
+    "1": "Cup is dispensed",
+    "2": "Teaspoon in cup",
+    "3": "Stirring",
+    "4": "Squashing",
+    "5": "Teabag In",
+    "6": "DI 06",
+    "7": "DI 07"
+  },
+  "digital_outputs": {
+    "0": "DO 00",
+    "1": "Water In valve (Kettle)",
+    "2": "Water Out valve (Kettle)",
+    "3": "Power Relay (Kettle)",
+    "4": "Cup Dispenser Solenoid",
+    "5": "Teabag Dispenser Solenoid",
+    "6": "Sugar Dispenser Solenoid",
+    "7": "Milk Dispenser Solenoid",
+    "8": "Up/Down Teaspoon actuator",
+    "9": "Stir Teaspoon actuator",
+    "10": "Squash Teaspoon Actuator",
+    "11": "Tea Ready Indicator",
+    "12": "DO 12",
+    "13": "DO 13",
+    "14": "DO 14",
+    "15": "DO 15"
+  },
+  "analog_inputs": {
+    "0": "AI 00",
+    "1": "Kettle Water Temperature (°C)",
+    "2": "Cup Weight (g)",
+    "3": "Kettle Weight (g)"
+  },
+  "analog_outputs": {
+    "0": "AO 00",
+    "1": "AO 01",
+    "2": "AO 02",
+    "3": "AO 03"
+  },
+  "analog_input_ranges": {
+    "0": {"min_value": "0", "max_value": "5", "unit": "V"},
+    "1": {"min_value": "0", "max_value": "100", "unit": "°C"},
+    "2": {"min_value": "0", "max_value": "1000", "unit": "g"},
+    "3": {"min_value": "0", "max_value": "2000", "unit": "g"}
+  },
+  "analog_output_ranges": {
+    "0": {"min_value": "0", "max_value": "5", "unit": "v"},
+    "1": {"min_value": "0", "max_value": "5", "unit": "V"},
+    "2": {"min_value": "0", "max_value": "5", "unit": "V"},
+    "3": {"min_value": "0", "max_value": "5", "unit": "V"}
+  }
+}

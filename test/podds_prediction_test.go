@@ -1,6 +1,7 @@
 package test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/richard-senior/mcp/pkg/util/podds"
@@ -29,6 +30,18 @@ func TestPrediction(t *testing.T) {
 
 	// run matches through the prediction
 	ds := podds.Datasource{}
-	m, err := ds.ProcessLeagueMatches(matches, []*podds.Match{})
+	d, err := ds.ProcessLeagueMatches(matches, []*podds.Match{})
 	// show prediction results somehow?
+	nm := d.Matches
+	listMatches(nm)
+
+}
+
+func listMatches(matches []*podds.Match) {
+	for _, match := range matches {
+		if match.ActualHomeGoals == -1 || match.ActualAwayGoals == -1 {
+			continue
+		}
+		fmt.Printf("%s vs %s %d - %d (%d - %d)\n", match.HomeTeamName, match.AwayTeamName, match.ActualHomeGoals, match.ActualAwayGoals, match.PoissonPredictedHomeGoals, match.PoissonPredictedAwayGoals)
+	}
 }

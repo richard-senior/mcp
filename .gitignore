@@ -7,6 +7,13 @@
 mcp
 .assets
 .podds
+main
+mcp-server
+**/podds.db
+
+# Cache files and database in _podds directory
+_podds/cache/
+_podds/podds.db
 
 # Test binary, built with `go test -c`
 *.test
