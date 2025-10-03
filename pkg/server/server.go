@@ -116,14 +116,16 @@ func (s *Server) RegisterDefaultTools() {
 	s.RegisterTool(wikipediaImageTool, tools.HandleWikipediaImageTool)
 
 	// Register Meme tool
-	memeTool := tools.NewMemeTool()
-	memeTool.Name = "mcp___" + memeTool.Name
-	s.RegisterTool(memeTool, tools.HandleMemeTool)
+	/*
+			memeTool := tools.NewMemeTool()
+			memeTool.Name = "mcp___" + memeTool.Name
+			s.RegisterTool(memeTool, tools.HandleMemeTool)
 
-	// Register Thoughts tool
-	thoughtsTool := tools.NewThoughtsTool()
-	thoughtsTool.Name = "mcp___" + thoughtsTool.Name
-	s.RegisterTool(thoughtsTool, tools.HandleThoughts)
+		// Register Thoughts tool
+		thoughtsTool := tools.NewThoughtsTool()
+		thoughtsTool.Name = "mcp___" + thoughtsTool.Name
+		s.RegisterTool(thoughtsTool, tools.HandleThoughts)
+	*/
 
 	// Register Go Debug tools
 	goDebugLaunchTool := tools.GoDebugLaunchTool()
