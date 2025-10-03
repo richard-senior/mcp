@@ -66,6 +66,10 @@ func updateLoggerFlags(l *Logger) {
 	l.errorLogger.SetFlags(flags)
 }
 
+func SetLevel(level LogLevel) {
+	defaultLogger.level = level
+}
+
 func SetShowDateTime(value bool) {
 	showDateTime = value
 	updateLoggerFlags(defaultLogger)
@@ -84,7 +88,7 @@ func SetLogOutput(outputType rune) {
 
 	switch outputType {
 	case 'c': // Console only
-		infoWriter = os.Stdout
+		infoWriter = os.Stderr  // Changed from Stdout to Stderr for MCP compatibility
 		errorWriter = os.Stderr
 	case 'f': // File only
 		var err error
@@ -103,7 +107,7 @@ func SetLogOutput(outputType rune) {
 			os.Exit(1)
 		}
 		// Use MultiWriter to write to both console and file
-		infoWriter = os.Stdout
+		infoWriter = os.Stderr  // Changed from Stdout to Stderr for MCP compatibility
 		errorWriter = os.Stderr
 		// Note: This is simplified; for a real implementation you'd use io.MultiWriter
 	default:
@@ -132,7 +136,7 @@ func NewLogger(level LogLevel) *Logger {
 	}
 
 	return &Logger{
-		infoLogger:  log.New(os.Stdout, "", flags),
+		infoLogger:  log.New(os.Stderr, "", flags),
 		errorLogger: log.New(os.Stderr, "", flags),
 		level:       level,
 	}

@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elvis-meme-server
+  labels:
+    app: elvis-meme
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elvis-meme
+  template:
+    metadata:
+      labels:
+        app: elvis-meme
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: meme-volume
+          mountPath: /usr/share/nginx/html
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+      volumes:
+      - name: meme-volume
+        configMap:
+          name: elvis-meme
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name localhost;
+        location / {
+            root /usr/share/nginx/html;
+            index image1.svg;
+            add_header Content-Type image/svg+xml;
+        }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elvis-meme-service
+spec:
+  selector:
+    app: elvis-meme
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+      nodePort: 30080
+  type: NodePort

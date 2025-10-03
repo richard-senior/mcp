@@ -10,8 +10,8 @@ import (
 	"syscall"
 
 	"github.com/richard-senior/mcp/internal/logger"
-	"github.com/richard-senior/mcp/pkg/protocol"
 	"github.com/richard-senior/mcp/pkg/prompts"
+	"github.com/richard-senior/mcp/pkg/protocol"
 	"github.com/richard-senior/mcp/pkg/resources"
 	"github.com/richard-senior/mcp/pkg/tools"
 	"github.com/richard-senior/mcp/pkg/transport"
@@ -85,6 +85,13 @@ func (s *Server) RegisterResource(resource protocol.Resource) {
 	logger.Info("Registered resource:", resource.Name)
 }
 
+// GetTools returns the list of registered tools
+func (s *Server) GetTools() []protocol.Tool {
+	mu.Lock()
+	defer mu.Unlock()
+	return s.tools
+}
+
 // RegisterDefaultTools registers all the default tools with the server
 func (s *Server) RegisterDefaultTools() {
 	logger.Info("Registering default tools...")
@@ -94,10 +101,14 @@ func (s *Server) RegisterDefaultTools() {
 	googleSearchTool.Name = "mcp___" + googleSearchTool.Name
 	s.RegisterTool(googleSearchTool, tools.HandleGoogleSearchTool)
 
-	// Register Html to Markdown tool
+	// Register Html to Markdown tools
 	html2MarkdownTool := tools.HTMLToMarkdownTool()
 	html2MarkdownTool.Name = "mcp___" + html2MarkdownTool.Name
 	s.RegisterTool(html2MarkdownTool, tools.HandleURLToMarkdown)
+
+	html2MarkdownFileTool := tools.HTMLToMarkdownFileTool()
+	html2MarkdownFileTool.Name = "mcp___" + html2MarkdownFileTool.Name
+	s.RegisterTool(html2MarkdownFileTool, tools.HandleUrlToMarkdownFile)
 
 	// Register Wikipedia image tool
 	wikipediaImageTool := tools.WikipediaImageTool()
@@ -110,35 +121,89 @@ func (s *Server) RegisterDefaultTools() {
 	s.RegisterTool(memeTool, tools.HandleMemeTool)
 
 	// Register Thoughts tool
-	//thoughtsTool := tools.NewThoughtsTool()
-	//thoughtsTool.Name = "mcp___" + thoughtsTool.Name
-	//s.RegisterTool(thoughtsTool, tools.HandleThoughts)
+	thoughtsTool := tools.NewThoughtsTool()
+	thoughtsTool.Name = "mcp___" + thoughtsTool.Name
+	s.RegisterTool(thoughtsTool, tools.HandleThoughts)
+
+	// Register Go Debug tools
+	goDebugLaunchTool := tools.GoDebugLaunchTool()
+	goDebugLaunchTool.Name = "mcp___" + goDebugLaunchTool.Name
+	s.RegisterTool(goDebugLaunchTool, tools.HandleGoDebugLaunch)
+
+	goDebugContinueTool := tools.GoDebugContinueTool()
+	goDebugContinueTool.Name = "mcp___" + goDebugContinueTool.Name
+	s.RegisterTool(goDebugContinueTool, tools.HandleGoDebugContinue)
+
+	goDebugStepTool := tools.GoDebugStepTool()
+	goDebugStepTool.Name = "mcp___" + goDebugStepTool.Name
+	s.RegisterTool(goDebugStepTool, tools.HandleGoDebugStep)
+
+	goDebugStepOverTool := tools.GoDebugStepOverTool()
+	goDebugStepOverTool.Name = "mcp___" + goDebugStepOverTool.Name
+	s.RegisterTool(goDebugStepOverTool, tools.HandleGoDebugStepOver)
+
+	goDebugStepOutTool := tools.GoDebugStepOutTool()
+	goDebugStepOutTool.Name = "mcp___" + goDebugStepOutTool.Name
+	s.RegisterTool(goDebugStepOutTool, tools.HandleGoDebugStepOut)
+
+	goDebugSetBreakpointTool := tools.GoDebugSetBreakpointTool()
+	goDebugSetBreakpointTool.Name = "mcp___" + goDebugSetBreakpointTool.Name
+	s.RegisterTool(goDebugSetBreakpointTool, tools.HandleGoDebugSetBreakpoint)
+
+	goDebugListBreakpointsTool := tools.GoDebugListBreakpointsTool()
+	goDebugListBreakpointsTool.Name = "mcp___" + goDebugListBreakpointsTool.Name
+	s.RegisterTool(goDebugListBreakpointsTool, tools.HandleGoDebugListBreakpoints)
+
+	goDebugRemoveBreakpointTool := tools.GoDebugRemoveBreakpointTool()
+	goDebugRemoveBreakpointTool.Name = "mcp___" + goDebugRemoveBreakpointTool.Name
+	s.RegisterTool(goDebugRemoveBreakpointTool, tools.HandleGoDebugRemoveBreakpoint)
+
+	goDebugEvalVariableTool := tools.GoDebugEvalVariableTool()
+	goDebugEvalVariableTool.Name = "mcp___" + goDebugEvalVariableTool.Name
+	s.RegisterTool(goDebugEvalVariableTool, tools.HandleGoDebugEvalVariable)
+
+	goDebugCloseTool := tools.GoDebugCloseTool()
+	goDebugCloseTool.Name = "mcp___" + goDebugCloseTool.Name
+	s.RegisterTool(goDebugCloseTool, tools.HandleGoDebugClose)
+
+	goDebugGetOutputTool := tools.GoDebugGetOutputTool()
+	goDebugGetOutputTool.Name = "mcp___" + goDebugGetOutputTool.Name
+	s.RegisterTool(goDebugGetOutputTool, tools.HandleGoDebugGetOutput)
 
 	// Register SVG Tools
 	//svgTool := tools.NewSvgTool()
 	//svgTool.Name = "mcp___" + svgTool.Name
 	//s.RegisterTool(svgTool, tools.HandleSvgTool)
+
+	// Register built-in handlers
+	s.handlers[string(protocol.MethodInitialize)] = s.handleInitialize
+	s.handlers[string(protocol.MethodInitialized)] = s.handleInitialized
+	s.handlers[string(protocol.MethodToolsList)] = s.handleToolsList
+	//s.handlers[string(protocol.MethodResourcesList)] = s.handleResourcesList
+	s.handlers[string(protocol.MethodToolsCall)] = s.handleToolsCall
+	s.handlers[string(protocol.MethodPromptsList)] = s.handlePromptsList
+	s.handlers[string(protocol.MethodPromptsGet)] = s.handlePromptsGet
 }
 
 // RegisterDefaultResources registers all the default resources with the server
 func (s *Server) RegisterDefaultPrompts() {
 	logger.Info("Registering default prompts...")
-	
+
 	// Initialize the prompt registry which will create sample prompts
 	registry := prompts.GetGlobalRegistry()
-	
+
 	// Get all prompts from the registry
 	promptList, err := registry.ListPrompts()
 	if err != nil {
 		logger.Error("Failed to load prompts from registry", err)
 		return
 	}
-	
+
 	// Add prompts to server
 	mu.Lock()
 	s.prompts = promptList
 	mu.Unlock()
-	
+
 	logger.Info("Loaded prompts from registry", len(promptList))
 }
 
@@ -156,15 +221,16 @@ func (s *Server) RegisterDefaultResources() {
 // Start starts the server and begins processing requests
 func (s *Server) Start() error {
 	logger.Info("Starting MCP server")
-	// Register built-in handlers
-	s.handlers[string(protocol.MethodInitialize)] = s.handleInitialize
-	s.handlers[string(protocol.MethodInitialized)] = s.handleInitialized
-	s.handlers[string(protocol.MethodToolsList)] = s.handleToolsList
-	//s.handlers[string(protocol.MethodResourcesList)] = s.handleResourcesList
-	s.handlers[string(protocol.MethodToolsCall)] = s.handleToolsCall
-	s.handlers[string(protocol.MethodPromptsList)] = s.handlePromptsList
-	s.handlers[string(protocol.MethodPromptsGet)] = s.handlePromptsGet
-
+	/*
+		// Register built-in handlers
+		s.handlers[string(protocol.MethodInitialize)] = s.handleInitialize
+		s.handlers[string(protocol.MethodInitialized)] = s.handleInitialized
+		s.handlers[string(protocol.MethodToolsList)] = s.handleToolsList
+		//s.handlers[string(protocol.MethodResourcesList)] = s.handleResourcesList
+		s.handlers[string(protocol.MethodToolsCall)] = s.handleToolsCall
+		s.handlers[string(protocol.MethodPromptsList)] = s.handlePromptsList
+		s.handlers[string(protocol.MethodPromptsGet)] = s.handlePromptsGet
+	*/
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -172,7 +238,7 @@ func (s *Server) Start() error {
 	// Start processing in a goroutine
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- s.processRequests()
+		errChan <- s.ProcessRequests()
 	}()
 
 	// Wait for either an error or a signal
@@ -186,7 +252,7 @@ func (s *Server) Start() error {
 }
 
 // processRequests continuously processes incoming requests
-func (s *Server) processRequests() error {
+func (s *Server) ProcessRequests() error {
 	for {
 		// Read a request
 		req, err := s.transport.ReadRequest()
@@ -211,13 +277,24 @@ func (s *Server) processRequests() error {
 // handleRequest processes a request and returns a response
 // TODO deal with multiple protocols
 func (s *Server) handleRequest(req *protocol.JsonRpcRequest) *protocol.JsonRpcResponse {
+	logger.Info(">> ", req.Method)
+
+	// Log the full incoming request for debugging
+	if reqBytes, err := json.Marshal(req); err == nil {
+		logger.Inform("Full request:", string(reqBytes))
+	}
+
+	// Handle notifications (no response required)
+	if strings.HasPrefix(req.Method, "notifications/") {
+		logger.Info("Received notification:", req.Method)
+		return nil // No response for notifications
+	}
+
 	// Create a base response
 	resp := &protocol.JsonRpcResponse{
 		JsonRPC: protocol.JsonRpcVersion,
 		ID:      req.ID,
 	}
-
-	logger.Info(">> ", req.Method)
 
 	// Find the appropriate handler
 	var handler HandlerFunc
@@ -298,6 +375,12 @@ func (s *Server) handleRequest(req *protocol.JsonRpcRequest) *protocol.JsonRpcRe
 	}
 	logger.Inform("output \n", string(resultBytes))
 	resp.Result = resultBytes
+
+	// Log the full response being sent back
+	if respBytes, err := json.Marshal(resp); err == nil {
+		logger.Inform("Full response:", string(respBytes))
+	}
+
 	return resp
 }
 
@@ -307,8 +390,8 @@ func (s *Server) handlePromptsList(params interface{}) (interface{}, error) {
 
 	// Create simplified prompt entries for the list response
 	type PromptListEntry struct {
-		Name        string                    `json:"name"`
-		Description string                    `json:"description,omitempty"`
+		Name        string                             `json:"name"`
+		Description string                             `json:"description,omitempty"`
 		Arguments   map[string]protocol.PromptArgument `json:"arguments,omitempty"`
 	}
 
@@ -373,7 +456,7 @@ func (s *Server) handlePromptsGet(params interface{}) (interface{}, error) {
 
 	// Return the processed prompt
 	response := struct {
-		Description string                 `json:"description"`
+		Description string                   `json:"description"`
 		Messages    []protocol.PromptMessage `json:"messages"`
 	}{
 		Description: prompt.Description,
@@ -426,10 +509,48 @@ func (s *Server) handleResourcesList(params interface{}) (interface{}, error) {
 
 // handleInitialize handles the initialize method
 func (s *Server) handleInitialize(params interface{}) (interface{}, error) {
-	logger.Info("Handling initialize request:")
+	logger.Info("Handling initialize request with", len(s.tools), "tools and", len(s.prompts), "prompts registered")
 
-	// Create the initialize response structure based on the example
-	// {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"Demo","version":"1.0.0"}}}
+	// Extract protocol version from request params
+	var requestedProtocolVersion string = "2024-11-05" // fallback
+
+	// Parse the params if they're JSON bytes
+	var paramsMap map[string]interface{}
+	if params != nil {
+		if jsonBytes, ok := params.(json.RawMessage); ok {
+			json.Unmarshal(jsonBytes, &paramsMap)
+		} else if directMap, ok := params.(map[string]interface{}); ok {
+			paramsMap = directMap
+		}
+
+		if version, exists := paramsMap["protocolVersion"].(string); exists {
+			requestedProtocolVersion = version
+			logger.Info("Using requested protocol version:", requestedProtocolVersion)
+		}
+	}
+	logger.Info("Final protocol version to use:", requestedProtocolVersion)
+
+	// Log the incoming parameters
+	if paramsBytes, err := json.Marshal(params); err == nil {
+		logger.Inform("Initialize request params:", string(paramsBytes))
+	} else {
+		logger.Warn("Failed to marshal initialize params:", err)
+	}
+
+	capabilities := map[string]any{}
+
+	// Only include capabilities if we have the corresponding features
+	if len(s.tools) > 0 {
+		capabilities["tools"] = map[string]any{
+			"listChanged": true,
+		}
+	}
+	if len(s.prompts) > 0 {
+		capabilities["prompts"] = map[string]any{
+			"listChanged": true,
+		}
+	}
+
 	initializeResponse := struct {
 		ProtocolVersion string         `json:"protocolVersion"`
 		Capabilities    map[string]any `json:"capabilities"`
@@ -438,24 +559,22 @@ func (s *Server) handleInitialize(params interface{}) (interface{}, error) {
 			Version string `json:"version"`
 		} `json:"serverInfo"`
 	}{
-		ProtocolVersion: "2024-11-05",
-		Capabilities: map[string]any{
-			// Resources do not seem to be supported
-			// "resources": struct{}{},
-			// Tools are very much supported
-			"tools": struct{}{},
-			// Prompts are supported
-			"prompts": struct{}{},
-			// Rules are not supported
-			//"rules": struct{}{},
-		},
+		ProtocolVersion: requestedProtocolVersion,
+		Capabilities:    capabilities,
 		ServerInfo: struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		}{
-			Name:    "mpc",
+			Name:    "mcp",
 			Version: "1.0.0",
 		},
+	}
+
+	// Log the response being sent
+	if responseBytes, err := json.Marshal(initializeResponse); err == nil {
+		logger.Inform("Initialize response:", string(responseBytes))
+	} else {
+		logger.Warn("Failed to marshal initialize response:", err)
 	}
 
 	return initializeResponse, nil

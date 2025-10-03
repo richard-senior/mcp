@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
@@ -19,7 +20,6 @@ func HTMLToMarkdownTool() protocol.Tool {
 		Name: "html_2_markdown",
 		Description: `
 		Assumes that the url returns HTML content and converts it to Markdown format for comsumption by LLM clients.
-		This allows the content to be more easily consumed by LLMs.
 		This tool should be used when:
 		- More information about a previous use of the google_search tool is required
 		- The user asks for a Precis or summary of the content of a web page
@@ -36,6 +36,78 @@ func HTMLToMarkdownTool() protocol.Tool {
 			Required: []string{"url"},
 		},
 	}
+}
+
+func HTMLToMarkdownFileTool() protocol.Tool {
+	return protocol.Tool{
+		Name: "html_2_markdown_file",
+		Description: `
+		Assumes that the url returns HTML content and converts it to Markdown format for comsumption by LLM clients and stores it
+		to the given path
+		This tool should be used when:
+		- You need to get information from a web page
+		- You need to store the file to disk in order to reduce context etc.
+		`,
+		InputSchema: protocol.InputSchema{
+			Type: "object",
+			Properties: map[string]protocol.ToolProperty{
+				"url": {
+					Type:        "string",
+					Description: "The URL of of the html to convert to markdown ie. https://www.richardsenior.net/",
+				},
+				"path": {
+					Type:        "string",
+					Description: "The local file path at which to store the retrieved content",
+				},
+			},
+			Required: []string{"url"},
+		},
+	}
+}
+
+func HandleUrlToMarkdownFile(params any) (any, error) {
+	foo, err := HandleURLToMarkdown(params)
+	if err != nil {
+		return nil, err
+	}
+	// check the the type of foo is 'map' (map[string]any) else return an error
+	md, ok := foo.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid parameters format")
+	}
+	// get the filepath
+	paramsMap, ok := params.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid parameters format")
+	}
+
+	path, ok := paramsMap["path"].(string)
+	if !ok || path == "" {
+		return nil, fmt.Errorf("no url was passed")
+	}
+	// write the text content to the file at filepath
+	// Create a file
+	file, err := os.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	// Write the markdown content to the file
+	_, err = file.WriteString(md["markdown"].(string))
+	if err != nil {
+		return nil, err
+	}
+	// Close the file
+	err = file.Close()
+	if err != nil {
+		return nil, err
+	}
+	// return the filepath
+	return map[string]any{
+		"filepath": path,
+		"url":      md["url"],
+		"title":    md["title"],
+		"domain":   md["domain"],
+	}, nil
 }
 
 // ConvertURLToMarkdown converts HTML content from a URL to markdown

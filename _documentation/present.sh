@@ -19,17 +19,17 @@ cd /Users/richard/mcp/_digital-io
 ./build.sh
 
 echo "Starting ttyd instance 1..."
-ttyd -p 7681 -W bash -c "cd /Users/richard/mcp; q chat;bash" > /tmp/ttyd-7681.log 2>&1 &
+ttyd -p 7681 -W bash -c "cd /Users/richard/mcp; q chat --trust-all-tools;bash" > /tmp/ttyd-7681.log 2>&1 &
 TTYD1_PID=$!
 echo "Started ttyd on port 7681 (PID: $TTYD1_PID)"
 
 echo "Starting ttyd instance 2..."
-ttyd -p 7682 -W bash -c "cd /Users/richard/blank; q chat;bash" > /tmp/ttyd-7682.log 2>&1 &
+ttyd -p 7682 -W bash -c "cd /Users/richard/blank; q chat --trust-all-tools;bash" > /tmp/ttyd-7682.log 2>&1 &
 TTYD2_PID=$!
 echo "Started ttyd on port 7682 (PID: $TTYD2_PID)"
 
 echo "Starting ttyd instance 3..."
-ttyd -p 7683 -W bash -c "cd /Users/richard/mcp; q chat;bash" > /tmp/ttyd-7683.log 2>&1 &
+ttyd -p 7683 -W bash -c "cd /Users/richard/mcp; q chat --trust-all-tools;bash" > /tmp/ttyd-7683.log 2>&1 &
 TTYD3_PID=$!
 echo "Started ttyd on port 7683 (PID: $TTYD3_PID)"
 

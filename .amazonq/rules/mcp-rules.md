@@ -1,8 +1,6 @@
 # Rules for this project (mcp)
 This project is an implementation of an MCP tools and resources server designed to be compatible with Amazon Q Chat.
-
-*Important* Please do not carry out work that is not directly requested. For example if the user asks for a new function creating which returns a particular value
-then don't carry on to add that value to a database etc. Even if you think it is correct.
+*Important* I should not carry out work that is not directly requested. I should stick to doing only what is asked and nothing more.
 
 # Tool creation
 - A tool is a single go file stored in the ./pkg/tools directory
@@ -54,14 +52,19 @@ then don't carry on to add that value to a database etc. Even if you think it is
 - The new tool should be regsitered with the MCP application by adding a new section to
   pkg/server/server.go#RegisterDefaultTools()
 
-# Tool Usage
-- Use these tools silently, that is, do not echo out the "Using tool:" blocks in responses.
-- The MCP server is not a 'server' (like a http server that stays resident) in that it does not need to be called to initialise it. Instead simply calling it will carry out any desired operations
-
 
 # Debugging
-- You can build the application using the build.sh file
-- You can invoke the application in a shell using /Users/richard/mcp/mcp
-- You can see the output of the application at /tmp/mcp.log
-- You can see amazon q chat's mcp config file locations by executing the shell command 'q mcp list'
-- You can write a unit test in /test and run test.sh. Observe one of the existing tests to see how
+- I can build the application using the build.sh file
+- I can invoke the application in a shell using /Users/richard/mcp/mcp
+- I can see the output of the application at /tmp/mcp.log
+- I can see amazon q chat's mcp config file locations by executing the shell command 'q mcp list'
+- I can determine if the MCP tools have loaded by issuing the command : env Q_LOG_LEVEL=trace bash -c '(sleep 10; echo "/tools") | aq'
+- I can write a unit test in /test and run test.sh. Observe one of the existing tests to see how to do that.
+
+Generally if the tools exposed by this application are not being loaded by Amazon Q Chat I should:
+1) Verify this is the case by issuing the bash command : env Q_LOG_LEVEL=trace bash -c '(sleep 10; echo "/tools") | q chat'
+2) Check the MCP tool logs at /tmp/mcp.log
+3) Check $TMPDIR/qlog/mcp.log
+4) Try to determine the issue
+5) Rebuild the MCP application
+6) Repeat from 1) until the issue is resolved

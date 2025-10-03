@@ -33,6 +33,7 @@ type ThoughtData struct {
 	BranchFromThought int       `json:"branchFromThought,omitempty"`
 	BranchID          string    `json:"branchId,omitempty"`
 	NeedsMoreThoughts bool      `json:"needsMoreThoughts,omitempty"`
+	Outcomes          string    `json:"outcomes,omitempty"`
 	Timestamp         time.Time `json:"timestamp"`
 }
 
@@ -167,10 +168,35 @@ This tool should be used when:
 					Type:        "boolean",
 					Description: "If more thoughts are needed",
 				},
+				"outcomes": {
+					Type:        "string",
+					Description: "Things learned from the previous thought, or thoughts. If there are no outcomes then just pass a blank string.",
+				},
+				"pwd": {
+					Type:        "string",
+					Description: "the present working directory of the client",
+				},
 			},
-			Required: []string{"thought", "nextThoughtNeeded", "thoughtNumber", "totalThoughts"},
+			Required: []string{"pwd", "thought", "nextThoughtNeeded", "thoughtNumber", "totalThoughts", "outcomes"},
 		},
 	}
+}
+
+// getThoughtsFilePath determines the appropriate path for the thoughts file
+// If pwd is provided and .amazonq directory exists there, use local file
+// Otherwise, fall back to the default ~/.mcp/thoughts location
+func getThoughtsFilePath(pwd string) string {
+	if pwd != "" {
+		amazonqDir := filepath.Join(pwd, ".amazonq")
+		if _, err := os.Stat(amazonqDir); err == nil {
+			// .amazonq directory exists, use local file
+			return filepath.Join(amazonqDir, "thoughts.json")
+		}
+	}
+
+	// Fall back to default location
+	dataDir := expandPath(THOUGHTS_DATA_DIR)
+	return filepath.Join(dataDir, THOUGHTS_DATA_FILE)
 }
 
 // expandPath expands the tilde in the path to the user's home directory
@@ -187,9 +213,9 @@ func expandPath(path string) string {
 }
 
 // NewSequentialThinking creates a new instance of SequentialThinking
-func NewSequentialThinking() *SequentialThinking {
-	dataDir := expandPath(THOUGHTS_DATA_DIR)
-	dataFile := filepath.Join(dataDir, THOUGHTS_DATA_FILE)
+func NewSequentialThinking(pwd string) *SequentialThinking {
+	dataFile := getThoughtsFilePath(pwd)
+	dataDir := filepath.Dir(dataFile)
 
 	// Create directory if it doesn't exist
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
@@ -292,16 +318,9 @@ func (st *SequentialThinking) saveToFile() {
 	logger.Info("Saved thoughts data to %s", st.dataFile)
 }
 
-// singleton instance of SequentialThinking
-var thinkingInstance *SequentialThinking
-var once sync.Once
-
-// GetThinkingInstance returns the singleton instance of SequentialThinking
-func GetThinkingInstance() *SequentialThinking {
-	once.Do(func() {
-		thinkingInstance = NewSequentialThinking()
-	})
-	return thinkingInstance
+// GetThinkingInstance creates a new instance of SequentialThinking for the given pwd
+func GetThinkingInstance(pwd string) *SequentialThinking {
+	return NewSequentialThinking(pwd)
 }
 
 // ValidateThoughtData validates the input data
@@ -353,6 +372,10 @@ func (st *SequentialThinking) ValidateThoughtData(data map[string]interface{}) (
 
 	if needsMoreThoughts, ok := data["needsMoreThoughts"].(bool); ok {
 		result.NeedsMoreThoughts = needsMoreThoughts
+	}
+
+	if outcomes, ok := data["outcomes"].(string); ok {
+		result.Outcomes = outcomes
 	}
 
 	return result, nil
@@ -450,7 +473,15 @@ func HandleThoughts(params any) (any, error) {
 		return nil, fmt.Errorf("invalid parameters format")
 	}
 
-	thinkingInstance := GetThinkingInstance()
+	// Extract pwd parameter if provided
+	var pwd string
+	if pwdValue, exists := paramsMap["pwd"]; exists {
+		if pwdStr, ok := pwdValue.(string); ok {
+			pwd = pwdStr
+		}
+	}
+
+	thinkingInstance := GetThinkingInstance(pwd)
 	response, err := thinkingInstance.ProcessThought(paramsMap)
 	if err != nil {
 		return response, err

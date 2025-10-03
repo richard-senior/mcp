@@ -1,10 +1,12 @@
 #!/bin/bash
 
-# Parameter tuning test script
-# Runs multiple parameter tuning tests
+# Test script for running INITIAL_POSITIONS validation test
+echo "Running INITIAL_POSITIONS validation test..."
 
-echo "Running Football Data Unit Tests (no HTTP required)"
-echo "======================================"
+# Build the project first
+./build.sh
 
-cd /Users/richard/mcp
-go test -v ./test
+# Run the specific test
+go test -v ./test -run TestInitialPositionsValidation
+
+echo "Test completed."
